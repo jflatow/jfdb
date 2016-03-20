@@ -145,7 +145,7 @@ static JFT_MergeFrame *back_into_frame(JFT_Cursor *cursors,
 JFT_Status JFT_cursor_merge(JFT_Cursor *cursors,
                             JFT_Amount num,
                             JFT_SpliceFun splice,
-                            void *acc,
+                            void *restrict acc,
                             int flags) {
   // cursors are assumed to be at the same initial location (i.e. root)
   // we currently support merging up to 64 cursors at a time
@@ -388,7 +388,9 @@ static inline JFT_Offset make_leaf(JFT_Buffer *buf,
   return size;
 }
 
-static JFT_Status splice_new(JFT_Cursor *cursors, JFT_MergeContext *ctx, JFT_Phase phase) {
+static JFT_Status splice_new(JFT_Cursor *cursors,
+                             JFT_MergeContext *ctx,
+                             JFT_Phase phase) {
   // determine what to do based on the most recent / highest precedence cursor
   // (cursors should be given in order of recency / precedence)
   JFT_MergeFrame *frame = ctx->frame;
@@ -569,12 +571,12 @@ JFT *JFT_cursor_merge_new(JFT_Cursor *cursors,
   return (JFT *)output->data;
 }
 
-JFT *JFT_atom(const JFT_Stem *primary,
-              const JFT_Leaf *value,
-              const JFT_Stem *indices,
+JFT *JFT_atom(const JFT_Stem *restrict primary,
+              const JFT_Leaf *restrict value,
+              const JFT_Stem *restrict indices,
               JFT_Count numIndices,
-              JFT_Buffer *scratch,
-              JFT_Buffer *output) {
+              JFT_Buffer *restrict scratch,
+              JFT_Buffer *restrict output) {
   // create an atomic trie (i.e. a single operation)
   // using these atoms we can make bigger and bigger tries
   // first, manually create a trie for each individual key

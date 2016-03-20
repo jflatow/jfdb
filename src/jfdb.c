@@ -74,7 +74,13 @@ static int pif_error(int test, const char *str) {
 }
 
 static int usage(int isError) {
-  fprintf(isError ? stderr : stdout, "Usage: jfdb {meta|keys} /db/path\n");
+  fprintf(isError ? stderr : stdout,
+          "Usage: \n"
+          " jfdb meta /db/path\n"
+          " jfdb fold /db/path [stop?]\n"
+          " jfdb node /db/path [offset]\n"
+          " jfdb primary /db/path [prefix]\n"
+          " jfdb indices /db/path [prefix]\n");
   return isError;
 }
 
@@ -93,7 +99,6 @@ int main(int argc, char **argv) {
   JFT_Stem prefix = (JFT_Stem) {.data = (uint8_t *)keyData};
   JFT_Symbol null = 0;
   JFT_Offset offset;
-  JFT_Cursor cursor;
   switch (cmd[0]) {
     case 'm':
       print_meta(db);
@@ -113,13 +118,11 @@ int main(int argc, char **argv) {
       break;
     case 'i':
       prefix.pre = JFT_SYMBOL_INDICES;
-      if (argc > 3) {
-        prefix.size = strlen(argv[3]) + 1;
-        memcpy(prefix.data, argv[3], prefix.size - 1);
-      }
-      cursor = JFT_cursor(db->kmap.map + db->tip.cp.offset);
-      JFDB_find(db, &cursor, &prefix);
-      print_info(db, cursor.node, &null);
+      prefix.size = 1;
+      print_match(db, &prefix, &null, argc - 3, argv + 3);
+      break;
+    default:
+      usage(1);
       break;
   }
 

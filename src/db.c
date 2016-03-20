@@ -324,9 +324,9 @@ JFDB *JFDB_annul(JFDB *db, const JFT_Stem *primary, int flags) {
 }
 
 JFDB *JFDB_store(JFDB *db,
-                 const JFT_Stem *primary,
-                 const JFT_Stem *value,
-                 const JFT_Stem *indices,
+                 const JFT_Stem *restrict primary,
+                 const JFT_Stem *restrict value,
+                 const JFT_Stem *restrict indices,
                  JFT_Count numIndices,
                  int flags) {
   JFDB_Region region = JFDB_valloc(db, value->size);
@@ -543,7 +543,12 @@ static JFT_Status splice_fold(JFT_Cursor *cursors, JFT_MergeContext *ctx, JFT_Ph
   return Step;
 }
 
-JFT_Status JFDB_fold(JFDB *db, JFT_Stem *stem, JFT_Symbol *stop, JFDB_FoldFun fun, void *acc, int flags) {
+JFT_Status JFDB_fold(JFDB *db,
+                     JFT_Stem *stem,
+                     JFT_Symbol *stop,
+                     JFDB_FoldFun fun,
+                     void *restrict acc,
+                     int flags) {
   // fold all active tries in the DB simultaneously, in order
   // as usual, stem serves as both input and output
   JFT_Amount N = db->tip.level, i = 0;
