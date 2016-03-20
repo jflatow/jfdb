@@ -1,0 +1,4 @@
+%% -*- erlang -*-
+{application, jfdb,
+ [{vsn, []},
+  {applications, [kernel, stdlib]}]}.

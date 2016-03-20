@@ -1,0 +1,36 @@
+#!/usr/bin/env escript
+%% -*- erlang -*-
+%%! -pa ebin
+
+main([Path, "lookup"|KeyPath]) ->
+    DB = jfdb:open(Path),
+    io:format("~p~n", [jfdb:lookup(DB, KeyPath)]);
+main([Path, "search"|KeyPath]) ->
+    DB = jfdb:open(Path),
+    io:format("~p~n", [jfdb:search(DB, KeyPath)]);
+main([Path, "assign", Num]) ->
+    DB = jfdb:open(Path),
+    DB = lists:foldl(
+           fun (X, D) when D =:= DB ->
+                   jfdb:assign(DB, [l(X rem 10), l(X)], #{map => X})
+           end, DB, lists:seq(1, i(Num))),
+    DB = lists:foldl(
+           fun (X, D) when D =:= DB ->
+                   jfdb:assign(DB, [l(X rem 10), l(X rem 10), l(X)], #{map => X})
+           end, DB, lists:seq(1, i(Num))),
+    DB = jfdb:assign(DB, key, val, [i1]),
+    DB = jfdb:assign(DB, <<"this is a key">>, #{fancy => <<"this is a val">>}, [a, x, y, z]),
+    DB = jfdb:assign(DB, [this, is, a, path], not_that_fancy, [x, y, z]),
+    DB = jfdb:assign(DB, [this, is, another, path], <<"this is not a path">>, [x, y, z]),
+    DB = jfdb:assign(DB, k1, v1, [[time, a], [place, p1]]),
+    DB = jfdb:assign(DB, k2, v2, [[time, b], [place, p1]]),
+    DB = jfdb:assign(DB, k3, v3, [[time, a], [place, p2]]),
+    DB = jfdb:assign(DB, k4, v4, [[time, c]]),
+    DB = jfdb:assign(DB, k5, v5, [[place, p2]]),
+    DB = jfdb:flush(DB).
+
+l(I) when is_integer(I) ->
+    integer_to_list(I).
+
+i(L) when is_list(L) ->
+    list_to_integer(L).

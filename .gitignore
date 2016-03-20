@@ -1,0 +1,9 @@
+*.o
+*.d
+*.dSYM
+jfdb
+erlang/.*
+erlang/ebin
+erlang/priv
+test/jfdb
+test/trie
