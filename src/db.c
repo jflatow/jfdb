@@ -569,5 +569,7 @@ JFT_Status JFDB_fold(JFDB *db,
     .fun = fun,
     .acc = acc
   };
-  return JFT_cursor_merge(cursors, i, &splice_fold, &slice, flags);
+  if (i)
+    return JFT_cursor_merge(cursors, i, &splice_fold, &slice, flags);
+  return Ok;
 }

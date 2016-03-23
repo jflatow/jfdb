@@ -10,10 +10,10 @@
 #define PAIR(A, B)        (enif_make_tuple2(env, A, B))
 #define STRING(Val)	  (enif_make_string(env, Val, ERL_NIF_LATIN1))
 #define TERM_EQ(lhs, rhs) (enif_compare(lhs, rhs) == 0)
+#define JFDB(jfdb)        (PAIR(ATOM_JFDB, make_reference(env, jfdb)))
 #define ASYNC(R)          (PAIR(ATOM_JFDB, R))
 #define ERROR(R)	  (PAIR(ATOM_ERROR, R))
 #define ERROR_JFDB(jfdb)  (ERROR(STRING(JFDB_str_error(jfdb->db))))
-#define SUBDB(jfdb, stem) (PAIR(ATOM_JFDB, ATOM("xxx-subdb")))
 
 // NB: we would create these statically in a process independent env
 //     however that doesn't work: is alloc env allowed in nif load?
@@ -44,6 +44,7 @@
 typedef struct queue queue;
 typedef struct message message;
 typedef struct ErlJFDB ErlJFDB;
+typedef struct ErlJFDBSub ErlJFDBSub;
 typedef ERL_NIF_TERM (*ErlJFDBFn)(ErlJFDB *, message *);
 
 struct ErlJFDB {
@@ -53,11 +54,17 @@ struct ErlJFDB {
   JFDB *db;
 };
 
+struct ErlJFDBSub {
+  ErlJFDB *parent;
+  JFT_Stem prefix;
+};
+
 struct message {
   message *next;
   ErlNifEnv *env;
   ErlNifPid from;
   ErlJFDBFn func;
+  ErlJFDBSub *subj;
   ERL_NIF_TERM term;
 };
 
@@ -70,6 +77,7 @@ struct queue {
 };
 
 static ErlNifResourceType *ErlJFDBType;
+static ErlNifResourceType *ErlJFDBSubType;
 static message STOP = {};
 
 /* Messages & Queue */
@@ -82,7 +90,7 @@ message_free(message *m) {
 }
 
 static message *
-message_new(ErlNifEnv *env, ErlJFDBFn func, ERL_NIF_TERM term) {
+message_new(ErlNifEnv *env, ErlJFDBFn func, ErlJFDBSub *subj, ERL_NIF_TERM term) {
   message *m;
   if (!(m = (message *)enif_alloc(sizeof(message))))
     return NULL;
@@ -97,6 +105,7 @@ message_new(ErlNifEnv *env, ErlJFDBFn func, ERL_NIF_TERM term) {
 
   m->next = NULL;
   m->func = func;
+  m->subj = subj;
   m->term = term ? enif_make_copy(m->env, term) : 0;
   return m;
 }
@@ -201,6 +210,24 @@ keys_count_max(JFT_Cursor cursor, JFT_Stem key, uint64_t max) {
   return count;
 }
 
+static JFT_Stem
+affix_primary(ErlJFDBSub *subj, ErlNifBinary *bin) {
+  if (subj) {
+    memcpy(subj->prefix.data + subj->prefix.size, bin->data, bin->size);
+    return (JFT_Stem) {
+      .pre = JFT_SYMBOL_PRIMARY,
+      .size = subj->prefix.size + bin->size + 1,
+      .data = subj->prefix.data
+    };
+  } else {
+    return (JFT_Stem) {
+      .pre = JFT_SYMBOL_PRIMARY,
+      .size = bin->size + 1,
+      .data = bin->data
+    };
+  }
+}
+
 /* JFDB */
 
 static int
@@ -222,6 +249,13 @@ static void
 ErlJFDB_free(ErlNifEnv *env, void *res) {
   ErlJFDB *jfdb = (ErlJFDB *)res;
   queue_push(jfdb->msgs, &STOP);
+}
+
+static void
+ErlJFDBSub_free(ErlNifEnv *env, void *res) {
+  ErlJFDBSub *subj = (ErlJFDBSub *)res;
+  enif_release_resource(subj->parent);
+  free(subj->prefix.data);
 }
 
 static void *
@@ -262,9 +296,32 @@ ErlJFDB_start(ErlNifEnv *env) {
   return NULL;
 }
 
+static ErlJFDBSub *
+ErlJFDBSub_new(ErlNifEnv *env, ErlJFDB *parent, JFT_Stem *prefix) {
+  ErlJFDBSub *subj;
+  if (!(subj = enif_alloc_resource(ErlJFDBSubType, sizeof(ErlJFDBSub))))
+    goto error;
+  if (!(subj->prefix.data = malloc(JFT_KEY_LIMIT)))
+    goto error;
+
+  subj->parent = parent;
+  enif_keep_resource((void *)parent);
+
+  subj->prefix.size = prefix->size;
+  memcpy(subj->prefix.data, prefix->data, prefix->size);
+
+  return subj;
+
+ error:
+  if (subj)
+    enif_release_resource(subj);
+  return NULL;
+}
+
 /* Fetch object support */
 
 typedef struct {
+  ErlJFDB *jfdb;
   ErlNifEnv *env;
   ErlNifBinary kbin, vbin;
   ERL_NIF_TERM list;
@@ -289,27 +346,28 @@ kv_fold(JFT_Cursor *cursor, JFDB_Slice *slice, JFT_Boolean isTerminal) {
       acc->list = CONS(PAIR(BIN(acc->kbin), BIN(acc->vbin)), acc->list);
     }
   } else {
+    ErlJFDBSub *subj;
+    if (!(subj = ErlJFDBSub_new(env, acc->jfdb, slice->stem)))
+      return ENoMem;
     if (!(enif_alloc_binary(slice->stem->size - slice->zero, &acc->kbin)))
       return ENoMem;
     memcpy(acc->kbin.data, slice->stem->data + slice->zero - 1, acc->kbin.size);
-    acc->list = CONS(PAIR(BIN(acc->kbin), SUBDB(jfdb, slice->stem)), acc->list);
+    acc->list = CONS(PAIR(BIN(acc->kbin), JFDB(subj)), acc->list);
   }
   return Next;
 }
 
 static ERL_NIF_TERM
-fold_kvs(ErlJFDB *jfdb, ErlNifEnv *env, ErlNifBinary *prefix) {
-  JFT_Stem stem = (JFT_Stem) {
-    .pre = JFT_SYMBOL_PRIMARY,
-    .size = prefix->size + 1,
-    .data = memcpy(jfdb->db->keyData, prefix->data, prefix->size)
-  };
+fold_kvs(ErlJFDB *jfdb, ErlNifEnv *env, JFT_Stem prefix) {
   JFT_Symbol stop = 0;
   KVs acc = (KVs) {
+    .jfdb = jfdb,
     .env = env,
     .list = enif_make_list(env, 0)
   };
-  if (JFDB_fold(jfdb->db, &stem, &stop, &kv_fold, &acc, JFT_FLAGS_REVERSE) != Ok)
+  // NB: make sure the prefix data buffer is safe to write to
+  prefix.data = memcpy(jfdb->db->keyData, prefix.data, prefix.size - !!prefix.pre);
+  if (JFDB_fold(jfdb->db, &prefix, &stop, &kv_fold, &acc, JFT_FLAGS_REVERSE) != Ok)
     return ERROR_EALLOC;
   return acc.list;
 }
@@ -322,11 +380,7 @@ ErlJFDB_fetch_async(ErlJFDB *jfdb, message *msg) {
     return ASYNC(ERROR_BADARG);
 
   JFT_Cursor cursor;
-  JFT_Stem val, key = (JFT_Stem) {
-    .pre = JFT_SYMBOL_PRIMARY,
-    .size = kbin.size + 1,
-    .data = kbin.data
-  };
+  JFT_Stem val, key = affix_primary(msg->subj, &kbin);
   if (JFDB_find(jfdb->db, &cursor, &key)) {
     if (JFT_cursor_at_terminal(&cursor)) {
       // terminal: return the value or undefined
@@ -337,9 +391,12 @@ ErlJFDB_fetch_async(ErlJFDB *jfdb, message *msg) {
         return ASYNC(BIN(vbin));
       }
       return ASYNC(ATOM_UNDEFINED);
+    } else if (cursor.symbol == JFT_SYMBOL_ANY) {
+      // post-terminal: return undefined
+      return ASYNC(ATOM_UNDEFINED);
     } else {
       // non-terminal (container): return list of kv
-      return ASYNC(fold_kvs(jfdb, env, &kbin));
+      return ASYNC(fold_kvs(jfdb, env, key));
     }
   }
   return ASYNC(ATOM_UNDEFINED);
@@ -358,12 +415,7 @@ ErlJFDB_annul_async(ErlJFDB *jfdb, message *msg) {
   if ((flags = ErlJFDB_write_flags(env, args[1])) < 0)
     return ASYNC(ERROR_BADARG);
 
-  JFT_Stem key = (JFT_Stem) {
-    .pre = JFT_SYMBOL_PRIMARY,
-    .size = bin.size + 1,
-    .data = bin.data
-  };
-
+  JFT_Stem key = affix_primary(msg->subj, &bin);
   if (JFDB_has_error(JFDB_annul(jfdb->db, &key, flags)))
     return ASYNC(ERROR_JFDB(jfdb));
   return ASYNC(ATOM_OK);
@@ -387,11 +439,7 @@ ErlJFDB_store_async(ErlJFDB *jfdb, message *msg) {
   if ((flags = ErlJFDB_write_flags(env, args[3])) < 0)
     return ASYNC(ERROR_BADARG);
 
-  JFT_Stem key = (JFT_Stem) {
-    .pre = JFT_SYMBOL_PRIMARY,
-    .size = kbin.size + 1,
-    .data = kbin.data
-  };
+  JFT_Stem key = affix_primary(msg->subj, &kbin);
   JFT_Stem val = (JFT_Stem) {
     .size = vbin.size,
     .data = vbin.data
@@ -639,7 +687,7 @@ ErlJFDB_open(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
       return ERROR_EALLOC;
     if (JFDB_has_error(jfdb->db))
       return ERROR_JFDB(jfdb);
-    return make_reference(env, jfdb);
+    return JFDB(jfdb);
   }
 
   return ERROR_BADARG;
@@ -647,24 +695,32 @@ ErlJFDB_open(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
 
 static ERL_NIF_TERM
 ErlJFDB_call(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
-  ErlJFDB *jfdb;
-  if (!enif_get_resource(env, argv[0], ErlJFDBType, (void **)&jfdb))
+  ErlJFDB *jfdb = NULL;
+  ErlJFDBSub *subj = NULL;
+  int arity;
+  const ERL_NIF_TERM *args;
+  if (!enif_get_tuple(env, argv[0], &arity, &args) || arity != 2)
     return ERROR_BADARG;
+  if (!enif_get_resource(env, args[1], ErlJFDBType, (void **)&jfdb)) {
+    if (!enif_get_resource(env, args[1], ErlJFDBSubType, (void **)&subj))
+      return ERROR_BADARG;
+    jfdb = subj->parent;
+  }
 
   // XXX: use direct calls instead of additional dispatch?
   message *msg;
   if (TERM_EQ(argv[1], ATOM_FETCH))
-    msg = message_new(env, &ErlJFDB_fetch_async, argv[2]);
+    msg = message_new(env, &ErlJFDB_fetch_async, subj, argv[2]);
   else if (TERM_EQ(argv[1], ATOM_ANNUL))
-    msg = message_new(env, &ErlJFDB_annul_async, argv[2]);
+    msg = message_new(env, &ErlJFDB_annul_async, subj, argv[2]);
   else if (TERM_EQ(argv[1], ATOM_STORE))
-    msg = message_new(env, &ErlJFDB_store_async, argv[2]);
+    msg = message_new(env, &ErlJFDB_store_async, subj, argv[2]);
   else if (TERM_EQ(argv[1], ATOM_QUERY))
-    msg = message_new(env, &ErlJFDB_query_async, argv[2]);
+    msg = message_new(env, &ErlJFDB_query_async, subj, argv[2]);
   else if (TERM_EQ(argv[1], ATOM_FLUSH))
-    msg = message_new(env, &ErlJFDB_flush_async, argv[2]);
+    msg = message_new(env, &ErlJFDB_flush_async, subj, argv[2]);
   else if (TERM_EQ(argv[1], ATOM_CRUSH))
-    msg = message_new(env, &ErlJFDB_crush_async, argv[2]);
+    msg = message_new(env, &ErlJFDB_crush_async, subj, argv[2]);
   else
     return ERROR_BADARG;
 
@@ -688,6 +744,9 @@ on_load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info) {
   ErlNifResourceFlags flags = ERL_NIF_RT_CREATE | ERL_NIF_RT_TAKEOVER;
   ErlJFDBType = enif_open_resource_type(env, NULL, "jfdb", &ErlJFDB_free, flags, NULL);
   if (ErlJFDBType == NULL)
+    return -1;
+  ErlJFDBSubType = enif_open_resource_type(env, NULL, "jfdb-sub", &ErlJFDBSub_free, flags, NULL);
+  if (ErlJFDBSubType == NULL)
     return -1;
   return 0;
 }
