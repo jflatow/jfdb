@@ -1,8 +1,11 @@
-*.o
+*.beam
 *.d
 *.dSYM
+*.o
+*.plt
+.*/
 jfdb
-erlang/.*
+erlang/*.mk
 erlang/ebin
 erlang/priv
 test/jfdb

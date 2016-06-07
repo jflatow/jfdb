@@ -1,5 +1,4 @@
-REBAR      = rebar
-CFLAGS     = -Wall -O3
+CFLAGS = -Wall -O3
 
 .PHONY: all clean erlang
 
@@ -22,6 +21,5 @@ clean:
 	rm -rf erlang/ebin erlang/priv
 	rm -rf test/jfdb test/trie
 
-erlang: CMD = compile
-erlang:
-	(cd erlang && $(REBAR) $(CMD))
+erlang: src/db.o src/trie.o
+	make -C $@
