@@ -1,7 +1,13 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <getopt.h>
 #include "../src/jfdb.h"
 #include "../src/repl.h"
+
+#define pinfo(fmt, ...) fprintf(stderr, fmt"\n", ##__VA_ARGS__)
+#define pwarn(fmt, ...) fprintf(stderr, fmt"\n", ##__VA_ARGS__)
+
+static JFT_Symbol null = 0;
 
 static void print_meta(JFDB *db) {
   JFDB_CheckPoint *cp = &db->tip.cp;
@@ -32,39 +38,31 @@ static JFT_Status pkey(JFT_Cursor *cursor, JFDB_Slice *slice, JFT_Boolean isTerm
   return Next;
 }
 
-static void print_keys(JFDB *db, JFT_Symbol *stop) {
-  JFT_Stem stem = (JFT_Stem) {.data = db->keyData};
-  JFDB_fold(db, &stem, stop, &pkey, NULL, 0);
+static void print_keys(JFDB *db, JFT_Stem *prefix, JFT_Symbol *stop) {
+  JFDB_fold(db, prefix, stop, &pkey, NULL, 0);
 }
 
-static void print_info(JFDB *db, JFT *node, JFT_Symbol *stop) {
+static void print_info(JFDB *db, JFT_Stem *prefix, JFT *node, JFT_Symbol *stop) {
   JFT_Stem key = (JFT_Stem) {.data = db->keyData};
   JFT_Keys keys;
   JFT_Cursor cursor = JFT_cursor(node);
-  printf("-----\n@ %ld ~ ", node - db->kmap.map);
+  printf("-----\n");
+  printf("@ %ld\n", node - db->kmap.map);
+  printf("> ");
+  print_stem(*prefix);
+  printf("< ");
   print_stem(JFT_key(cursor.node, db->keyData));
   print_node(cursor.node);
   for (keys = JFT_keys(&cursor, &key, Forward); JFT_keys_next_until(&keys, stop); ) {
-    if (JFT_cursor_at_terminal(&cursor))
-      printf("[val] ");
-    else
-      printf("[sub] ");
+    printf(JFT_cursor_at_terminal(&cursor) ? "[val] " : "[sub] ");
     print_stem(*keys.stem);
   }
 }
 
-static void print_match(JFDB *db, JFT_Stem *prefix, JFT_Symbol *stop, int N, char **argv) {
+static void print_find(JFDB *db, JFT_Stem *prefix, JFT_Symbol *stop) {
   JFT_Cursor cursor;
-  JFT_KeySize len, off = 0;
-  for (int i = 0; i < N; i++) {
-    len = strlen(argv[i]);
-    memcpy(prefix->data + off, argv[i], len);
-    prefix->data[off + len] = 0;
-    off += len + 1;
-  }
-  prefix->size += off;
   JFDB_find(db, &cursor, prefix);
-  print_info(db, cursor.node, stop);
+  print_info(db, prefix, cursor.node, stop);
 }
 
 static int pif_error(int test, const char *str) {
@@ -77,11 +75,72 @@ static int usage(int isError) {
   fprintf(isError ? stderr : stdout,
           "Usage: \n"
           " jfdb meta /db/path\n"
-          " jfdb fold /db/path [stop?]\n"
           " jfdb node /db/path [offset]\n"
-          " jfdb primary /db/path [prefix]\n"
-          " jfdb indices /db/path [prefix]\n");
+          " jfdb keys /db/path [-n] [-p|-i] [prefix]\n"
+          " jfdb find /db/path [-n] [-p|-i] [prefix]\n");
   return isError;
+}
+
+static JFT_Stem *read_prefix(JFT_Stem *prefix, int omit, int argc, char **argv) {
+  JFT_KeySize len, off = 0;
+  for (int i = 0; i < argc; i++) {
+    len = strlen(argv[i]);
+    memcpy(prefix->data + off, argv[i], len);
+    prefix->data[off + len] = 0;
+    off += len + 1;
+  }
+  prefix->size += off - (argc && omit); // maybe omit trailing NULL
+  return prefix;
+}
+
+static int prefix_opts(JFT_Stem *prefix, JFT_Symbol **stop, int argc, char **argv) {
+  extern char *optarg;
+  extern int optind, optopt;
+  int opt, ptr, err = 0, omit = 1;
+
+  static struct option options[] = {
+    {"null", no_argument, NULL, 'n'},
+    {"stop", no_argument, NULL, 's'},
+    {"primary", no_argument, NULL, 'p'},
+    {"indices", no_argument, NULL, 'i'},
+    {}
+  };
+
+  // default
+  prefix->pre = JFT_SYMBOL_PRIMARY;
+  prefix->size = 1;
+
+  while ((opt = getopt_long(argc, argv, "hnspi", options, &ptr)) != -1) {
+    switch(opt) {
+      case 'h':
+        return usage(0);
+      case 'n':
+        omit = 0;
+        break;
+      case 's':
+        *stop = &null;
+        break;
+      case 'p':
+        prefix->pre = JFT_SYMBOL_PRIMARY;
+        prefix->size = 1;
+        break;
+      case 'i':
+        prefix->pre = JFT_SYMBOL_INDICES;
+        prefix->size = 1;
+        break;
+      case ':':
+        pwarn("%s: option requires an argument -- %c", argv[0], optopt);
+        err++;
+        break;
+      case '?':
+        pwarn("%s: illegal option -- %c", argv[0], optopt);
+        err++;
+        break;
+    }
+  }
+
+  read_prefix(prefix, omit, argc - optind, argv + optind);
+  return err;
 }
 
 int main(int argc, char **argv) {
@@ -97,29 +156,24 @@ int main(int argc, char **argv) {
 
   char *keyData[JFT_KEY_LIMIT];
   JFT_Stem prefix = (JFT_Stem) {.data = (uint8_t *)keyData};
-  JFT_Symbol null = 0;
+  JFT_Symbol *stop = NULL;
   JFT_Offset offset;
   switch (cmd[0]) {
     case 'm':
       print_meta(db);
       break;
-    case 'f':
-      print_keys(db, argc > 3 ? &null : NULL);
-      break;
     case 'n':
       offset = argc > 3 ? atoi(argv[3]) : db->tip.cp.offset;
       offset = MAX(offset, sizeof(JFDB_Header));
-      print_info(db, db->kmap.map + offset, &null);
+      print_info(db, &prefix, db->kmap.map + offset, &null);
       break;
-    case 'p':
-      prefix.pre = JFT_SYMBOL_PRIMARY;
-      prefix.size = 1;
-      print_match(db, &prefix, &null, argc - 3, argv + 3);
+    case 'k':
+      if (!prefix_opts(&prefix, &stop, argc - 2, argv + 2))
+        print_keys(db, &prefix, stop);
       break;
-    case 'i':
-      prefix.pre = JFT_SYMBOL_INDICES;
-      prefix.size = 1;
-      print_match(db, &prefix, &null, argc - 3, argv + 3);
+    case 'f':
+      if (!prefix_opts(&prefix, &stop, argc - 2, argv + 2))
+        print_find(db, &prefix, stop);
       break;
     default:
       usage(1);

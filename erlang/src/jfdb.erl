@@ -16,6 +16,9 @@
 %% Raw
 -export([open/1,
          open/2,
+         keys/1,
+         keys/2,
+         keys/3,
          fetch/2,
          annul/2,
          annul/3,
@@ -30,7 +33,10 @@
 -export([call/3]).
 
 %% Object
--export([exists/2,
+-export([paths/1,
+         paths/2,
+         paths/3,
+         exists/2,
          lookup/2,
          lookup/3,
          remove/2,
@@ -46,6 +52,7 @@
 %% Debug
 -export([bin/1,
          key/1,
+         pre/1,
          querify/1,
          unkey/1,
          unval/1,
@@ -66,8 +73,18 @@ key(Str = [C|_]) when is_integer(C) ->
 key(Path) when is_list(Path) ->
     << <<(bin(X))/binary, 0>> || X <- Path >>.
 
+pre(Path) ->
+    case key(Path) of
+        <<>> ->
+            <<>>;
+        Key ->
+            binary:part(Key, {0, size(Key) - 1})
+    end.
+
 querify({Det, Terms}) when Det =:= any; Det =:= all; Det =:= but ->
     {Det, [querify(T) || T <- Terms]};
+querify({pre, Path}) ->
+    pre(Path);
 querify(Path) ->
     key(Path).
 
@@ -122,6 +139,15 @@ call(DB, Method, Args) ->
             Error
     end.
 
+keys(DB) ->
+    keys(DB, <<>>).
+
+keys(DB, Key) ->
+    keys(DB, Key, []).
+
+keys(DB, Key, Opts) ->
+    call(DB, keys, {Key, Opts}).
+
 fetch(DB, Key) ->
     call(DB, fetch, Key).
 
@@ -152,12 +178,25 @@ flush(DB) ->
 crush(DB) ->
     call(DB, crush, {}).
 
+paths(DB) ->
+    paths(DB, []).
+
+paths(DB, Path) ->
+    paths(DB, Path, []).
+
+paths(DB, {pre, Path}, Opts) ->
+    [unkey(K) || K <- keys(DB, pre(Path), Opts)];
+paths(DB, Path, Opts) ->
+    [unkey(K) || K <- keys(DB, key(Path), Opts)].
+
 exists(DB, Path) ->
     lookup(DB, Path) =/= undefined.
 
 lookup(DB, Path) ->
     lookup(DB, Path, undefined).
 
+lookup(DB, {pre, Path}, Default) ->
+    decode(fetch(DB, pre(Path)), Default);
 lookup(DB, Path, Default) ->
     decode(fetch(DB, key(Path)), Default).
 

@@ -55,9 +55,9 @@ static inline void print_root(const JFT *node) {
 }
 
 static inline void print_fork(uint8_t byte, JFT_Offset offset) {
-    printf(" ");
-    print_bytes(&byte, 1);
-    printf(" %llu\n", offset);
+  printf(" ");
+  print_bytes(&byte, 1);
+  printf(" %llu\n", offset);
 }
 
 static inline void print_scan(const JFT *node) {
@@ -80,10 +80,11 @@ static inline void print_jump(const JFT *node) {
 
 static inline void print_leaf(const JFT *node) {
   JFT_Leaf leaf = JFT_leaf(node);
+  printf("leaf size:  %u\n", leaf.size);
   printf("leaf words:");
-  for (int i = 0; i < leaf.size && i < 10; i++)
+  for (int i = 0; i < leaf.size && i < 10000; i++) // XXX
     printf(" %llu", leaf.data[i]);
-  if (leaf.size > 10)
+  if (leaf.size > 10000) // XXX
     printf(" ...");
   printf("\n");
 }

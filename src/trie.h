@@ -9,7 +9,7 @@
 #define JFT_FLAGS_ATOM         0b0100
 
 #define JFT_ITER_WORDS         16
-#define JFT_KEY_LIMIT	      (1 << 12)
+#define JFT_KEY_LIMIT	      (1 << 10)    // changeable: max is (1 << 12)
 #define JFT_MASK_CAPACITY     (sizeof(JFT_Mask) * 8)
 #define JFT_MASK_ACTIVE(N)    (-1LLU >> (JFT_MASK_CAPACITY - (N)))
 
@@ -674,6 +674,14 @@ static inline JFT_Stem JFT_key(const JFT *trie, uint8_t *keyData) {
     key.data = memcpy(key.data - n, stem.data, n);
   }
   return key;
+}
+
+static inline JFT_Stem JFT_key_copy(JFT_Stem *key, uint8_t *keyData) {
+  return (JFT_Stem) {
+    .pre = key->pre,
+    .size = key->size,
+    .data = memcpy(keyData, key->data, key->size - !!key->pre)
+  };
 }
 
 /* Iterators */

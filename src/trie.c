@@ -104,7 +104,7 @@ static JFT_MergeFrame *move_into_frame(JFT_Cursor *cursors,
   JFT_Mask definite = 0, possible = 0, preclude = 0;
   for (JFT_Amount b = ffsll(relevant); b; b = ffsll(relevant &= relevant - 1)) {
     JFT_Amount i = b - 1;
-    JFT_Mask m = 1 << i;
+    JFT_Mask m = 1LLU << i;
     if (frame->active & m)
       advance(&cursors[i], direction);
     symbol = cursors[i].symbol;
@@ -202,7 +202,7 @@ JFT_Status JFT_cursor_merge(JFT_Cursor *cursors,
           // if at the root, there can be no siblings, so we are done
           // reset the offset to that of the parent (in case prev changed it)
           if (frame == stack)
-            goto done;
+            goto out;
           frame->offset = (frame - 1)->offset;
           frame = ctx.frame = move_into_frame(cursors,
                                               JFT_cursor_next,
@@ -219,6 +219,7 @@ JFT_Status JFT_cursor_merge(JFT_Cursor *cursors,
     // we hit a wall, start backing out: pop the frame, call second splice
     // its not possible we are at the root, we would have exited already
     frame = ctx.frame = back_into_frame(cursors, frame - 1, direction);
+  out:
     result = splice(cursors, &ctx, Out);
 
     // we could be at the root now, if so pass the result through
@@ -366,6 +367,7 @@ static inline JFT_Offset prep_leaf(JFT_Buffer *buf,
 
 static inline void edit_leaf(JFT_Buffer *buf,
                              JFT_Offset pos,
+                             const JFT_Stem *stem,
                              JFT_Count maxWords,
                              JFT_Count numWords) {
   // correct the actual number of words written
@@ -374,7 +376,7 @@ static inline void edit_leaf(JFT_Buffer *buf,
   if (maxWords < 0xFF)
     JFT_set_type_info(buf->data + pos, numWords);
   else
-    *(JFT_Count *)(buf + pos + sizeof(JFT_Head)) = numWords;
+    *(JFT_Count *)(buf->data + pos + sizeof(JFT_Head) + stem->size) = numWords;
 }
 
 static inline JFT_Offset make_leaf(JFT_Buffer *buf,
@@ -511,7 +513,7 @@ static JFT_Status splice_new(JFT_Cursor *cursors,
       } while (JFT_iter_next(&i));
 
       // correct the leaf node using the actual number of words
-      edit_leaf(buf, frame->offset, maxWords, numWords);
+      edit_leaf(buf, frame->offset, &cons->stem, maxWords, numWords);
 
       if (numWords > cons->root.maxIndices)
         cons->root.maxIndices = numWords;
@@ -701,14 +703,14 @@ JFT_Boolean JFT_iter_any_next(JFT_Iter *iter) {
       // if the iter is exhausted, remove it from active and skip to next
       while (i->batch.position >= i->batch.size)
         if (!JFT_iter_next(i)) {
-          iter->sub.many.active &= ~(1 << k);
+          iter->sub.many.active &= ~(1LLU << k);
           goto nextActive;
         }
       if ((elem = i->batch.data[i->batch.position]) == min) {
-        hasMin |= (1 << k);
+        hasMin |= (1LLU << k);
       } else if (elem < min) {
         min = elem;
-        hasMin = (1 << k);
+        hasMin = (1LLU << k);
       }
     nextActive:
       /* done with the active iter, move on to next */;
@@ -744,14 +746,14 @@ JFT_Boolean JFT_iter_all_next(JFT_Iter *iter) {
       // if the iter is exhausted, remove it from active and skip to next
       while (i->batch.position >= i->batch.size)
         if (!JFT_iter_next(i)) {
-          iter->sub.many.active &= ~(1 << k);
+          iter->sub.many.active &= ~(1LLU << k);
           goto nextActive;
         }
       if ((elem = i->batch.data[i->batch.position]) == min) {
-        hasMin |= (1 << k);
+        hasMin |= (1LLU << k);
       } else if (elem < min) {
         min = elem;
-        hasMin = (1 << k);
+        hasMin = (1LLU << k);
       }
     nextActive:
       /* done with the active iter, move on to next */;
@@ -788,14 +790,14 @@ JFT_Boolean JFT_iter_but_next(JFT_Iter *iter) {
       // if the iter is exhausted, remove it from active and skip to next
       while (i->batch.position >= i->batch.size)
         if (!JFT_iter_next(i)) {
-          iter->sub.many.active &= ~(1 << k);
+          iter->sub.many.active &= ~(1LLU << k);
           goto nextActive;
         }
       if ((elem = i->batch.data[i->batch.position]) == min) {
-        hasMin |= (1 << k);
+        hasMin |= (1LLU << k);
       } else if (elem < min) {
         min = elem;
-        hasMin = (1 << k);
+        hasMin = (1LLU << k);
       }
     nextActive:
       /* done with the active iter, move on to next */;
@@ -804,7 +806,7 @@ JFT_Boolean JFT_iter_but_next(JFT_Iter *iter) {
     // add the min to the batch iff only the first has it (main difference b/w but & all)
     if (!hasMin)
       break;
-    else if (hasMin == (1 << (ffsll(iter->sub.many.exists) - 1)))
+    else if (hasMin == (1LLU << (ffsll(iter->sub.many.exists) - 1)))
       words[iter->batch.size++] = min;
     // advance any iters we found the min on
     for (int b = ffsll(hasMin); b; b = ffsll(hasMin &= hasMin - 1))

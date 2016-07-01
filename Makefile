@@ -10,7 +10,7 @@ jfdb:   src/jfdb.c src/db.o src/trie.o src/repl.h
 test/%: test/%.c src/db.o src/trie.o src/repl.h
 	$(CC) $(CFLAGS) -o $@ $(filter %.c %.o,$^)
 
-%.o:    %.c %.h src/jfdb.h
+%.o:    %.c %.h src/jfdb.h Makefile
 	$(CC) $(CFLAGS) -o $@ $(filter %.c %.o,$^) -c
 
 clean:
