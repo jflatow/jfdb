@@ -1,4 +1,4 @@
-CFLAGS = -Wall -O3
+CFLAGS = -Wall -O3 -std=c99
 
 .PHONY: all clean erlang
 

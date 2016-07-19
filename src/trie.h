@@ -25,6 +25,11 @@
 #define MIN(a, b)            ((a) < (b) ? (a) : (b))
 #define MAX(a, b)            ((a) > (b) ? (a) : (b))
 
+#ifdef __GNUC__
+#define ffsll(x)             (__builtin_ffsll(x))
+#define flsll(x)             ((x) == 0 ? 0 : sizeof(x) * 8 - __builtin_clz(x))
+#endif
+
 /* Convenience */
 
 #define JFTK(key) ((JFT_Stem) {.size = strlen(key) + 1, .data = (uint8_t *)key})
@@ -187,19 +192,19 @@ typedef JFT_Status (*JFT_SpliceFun)(JFT_Cursor *cursors, JFT_MergeContext *ctx, 
 /* Jump table ranges */
 
 static const JFT_Range JumpTableRanges[] = {
-  (JFT_Range) {.min = JFT_SYMBOL_PRIMARY,  // root
+  {.min = JFT_SYMBOL_PRIMARY,  // root
                .max = JFT_SYMBOL_INDICES},
-  (JFT_Range) {.min = 65,  .max = 90},     // upper
-  (JFT_Range) {.min = 97,  .max = 122},    // lower
-  (JFT_Range) {.min = 48,  .max = 57},     // numeral
-  (JFT_Range) {.min = 0,   .max = 31},     // control
+  {.min = 65,  .max = 90},     // upper
+  {.min = 97,  .max = 122},    // lower
+  {.min = 48,  .max = 57},     // numeral
+  {.min = 0,   .max = 31},     // control
 #define JFT_JUMP_TABLE_BIG  5
-  (JFT_Range) {.min = 65,  .max = 122},    // upper-lower
-  (JFT_Range) {.min = 48,  .max = 122},    // numeral-lower
-  (JFT_Range) {.min = 32,  .max = 127},    // printable
-  (JFT_Range) {.min = 0,   .max = 127},    // ascii
-  (JFT_Range) {.min = 128, .max = 255},    // extended / utf-8
-  (JFT_Range) {.min = 0,   .max = 255}     // binary
+  {.min = 65,  .max = 122},    // upper-lower
+  {.min = 48,  .max = 122},    // numeral-lower
+  {.min = 32,  .max = 127},    // printable
+  {.min = 0,   .max = 127},    // ascii
+  {.min = 128, .max = 255},    // extended / utf-8
+  {.min = 0,   .max = 255}     // binary
 #define JFT_JUMP_TABLE_END  11
 };
 
@@ -375,8 +380,8 @@ static inline JFT_Offset *JFT_scan_child_slot(const JFT *trie,
   JFT_TypeInfo length = JFT_type_info(trie);
   const uint8_t *symbols = JFT_type_data(trie);
   JFT_Offset *offsets = (JFT_Offset *)(symbols + length);
-  JFT_Offset lo = 0, hi = length, mid;
-  JFT_Symbol at;
+  JFT_Offset lo = 0, hi = length, mid = 0;
+  JFT_Symbol at = 0;
 
   // if looking for nil, return min, max, or nil (children can be missing, so search)
   if (symbol == JFT_SYMBOL_NIL) {
@@ -489,6 +494,7 @@ static inline JFT_Offset JFT_child_offset(const JFT *trie,
     case ScanList:  return JFT_maybe_offset(JFT_scan_child_slot(trie, symbol, delta));
     case JumpTable: return JFT_maybe_offset(JFT_jump_child_slot(trie, symbol, delta));
     case Leaf:      return 0;
+    default:        return 0; // no other types, impossible
   }
 }
 

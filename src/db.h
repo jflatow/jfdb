@@ -1,6 +1,7 @@
 #ifndef __JFDB_DB_H__
 #define __JFDB_DB_H__
 
+#include <stdarg.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include "jfdb.h"
@@ -12,9 +13,6 @@
 #define RUP(x, y) (((x) + (y) - 1) / (y))
 #define RTM(x, m) (RUP(x, m) * (m))
 
-#define JFDB_set_error(db, code, fmt, ...) \
-  (db->error = code, snprintf(db->errstr, JFDB_MAX_ERRSTR, fmt, ##__VA_ARGS__), db)
-
 #if _POSIX_SYNCHRONIZED_IO > 0
 #define JFDB_fsync fdatasync
 #else
@@ -22,6 +20,15 @@
 #endif
 
 #define JFDB_msync msync
+
+static inline JFDB *JFDB_set_error(JFDB *db, int code, const char *fmt, ...) {
+  va_list ap;
+  va_start(ap, fmt);
+  db->error = code;
+  vsnprintf(db->errstr, JFDB_MAX_ERRSTR, fmt, ap);
+  va_end(ap);
+  return db;
+}
 
 static inline JFDB_RegionMap *JFDB_region_map_alloc(uint32_t lower, uint32_t upper, int invert) {
   // NB: lower <= S < upper

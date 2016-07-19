@@ -13,19 +13,19 @@ static void print_meta(JFDB *db) {
   JFDB_CheckPoint *cp = &db->tip.cp;
   printf("-----\n");
   printf("magic: %x:%x\n", db->tip.magic, db->tip.version);
-  printf("level: %llu / %llu\n", cp->levels, 1LLU << db->tip.level);
+  printf("level: %"PRIu64" / %llu\n", cp->levels, 1LLU << db->tip.level);
   printf("-----\n");
   printf("gaps:\n");
   for (int i = 0; i < JFDB_NUM_GAPS; i++)
     printf(" %8u @ %-8u\n", cp->gaps[i].size, cp->gaps[i].block);
-  printf("keys: %12zu / %-12llu\n", db->kmap.size, cp->lengthKeys);
-  printf("vals: %12zu / %-12llu\n", db->vmap.size, cp->lengthVals);
+  printf("keys: %12zu / %-12"PRIu64"\n", db->kmap.size, cp->lengthKeys);
+  printf("vals: %12zu / %-12"PRIu64"\n", db->vmap.size, cp->lengthVals);
   printf("-----\n");
   printf("roots:\n");
   JFT *trie;
   for (JFT_Offset pos = cp->offset; pos; pos = JFT_parent_offset(trie)) {
     trie = JFDB_get_trie(db, pos);
-    printf("      %12llu = ", pos);
+    printf("      %12"PRIu64" = ", pos);
     print_bits((JFT_Head *)trie, 1);
     printf("\n");
   }

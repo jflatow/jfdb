@@ -276,7 +276,7 @@ static inline JFT_Offset make_root(JFT_Buffer *buf) {
 static inline JFT_Offset make_scan_list(JFT_Buffer *buf,
                                         JFT_Offset parentPos,
                                         const JFT_Stem *stem,
-                                        const JFT_SymbolSet *symbols,
+                                        JFT_SymbolSet *symbols,
                                         int numSymbols) {
   // first create the list of symbols for searching, then the list of offsets
   JFT_Offset size = JFT_scan_size(stem->size, numSymbols);
@@ -320,7 +320,7 @@ static inline JFT_Offset make_branch(JFT_Buffer *buf,
                                      JFT_Offset parentPos,
                                      const JFT_Stem *stem,
                                      const JFT_Range *range,
-                                     const JFT_SymbolSet *symbols,
+                                     JFT_SymbolSet *symbols,
                                      int numSymbols) {
   // figure out what kind of branch to make
   if (numSymbols < 16)
