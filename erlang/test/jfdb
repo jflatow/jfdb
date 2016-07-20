@@ -22,6 +22,7 @@ main([Path, "assign", Num]) ->
     DB = jfdb:assign(DB, <<"this is a key">>, #{fancy => <<"this is a val">>}, [a, x, y, z]),
     DB = jfdb:assign(DB, [this, is, a, path], not_that_fancy, [x, y, z]),
     DB = jfdb:assign(DB, [this, is, another, path], <<"this is not a path">>, [x, y, z]),
+    DB = jfdb:assign(DB, [lots, o, keys], {ok, '?'}, [l(I) || I <- lists:seq(1, 1024)]),
     DB = jfdb:assign(DB, k1, v1, [[time, a], [place, p1]]),
     DB = jfdb:assign(DB, k2, v2, [[time, b], [place, p1]]),
     DB = jfdb:assign(DB, k3, v3, [[time, a], [place, p2]]),

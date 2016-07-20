@@ -582,47 +582,64 @@ JFT *JFT_atom(const JFT_Stem *restrict primary,
   // create an atomic trie (i.e. a single operation)
   // using these atoms we can make bigger and bigger tries
   // first, manually create a trie for each individual key
-  JFT_Count num = numIndices + 1;
-  JFT_Offset rootOffsets[num];
+  JFT *atom;
+  JFT_Count num = numIndices + 1, k = 0, batch = MIN(num, JFT_MASK_CAPACITY);
+  JFT_Cursor cursors[batch];
+  JFT_Offset rootOffsets[batch];
   JFT_Root *root;
   JFT_Stem stem = (JFT_Stem) {
     .pre = JFT_SYMBOL_PRIMARY,
     .size = primary->size + !primary->pre,
     .data = primary->data
   };
-  if (!(BUF_CLR(scratch)))
-    return NULL;
-  if (!(make_root(scratch)))
-    return NULL;
-  if (!(make_leaf(scratch, 0, &stem, value)))
-    return NULL;
-  root = (JFT_Root *)(scratch->data);
-  root->extent = scratch->mark;
-  root->numPrimary = 1;
-  root->maxKeySize = stem.size;
-  rootOffsets[0] = 0;
 
-  JFT_Leaf index = JFTV(root->primaryOffset);
-  for (JFT_Count i = 1; i < num; i++) {
-    rootOffsets[i] = scratch->mark;
-    stem.pre = JFT_SYMBOL_INDICES;
-    stem.size = indices[i - 1].size + !indices[i - 1].pre;
-    stem.data = indices[i - 1].data;
-    if (!(make_root(scratch)))
+  do {
+    if (!(BUF_CLR(scratch)))
       return NULL;
-    if (!(make_leaf(scratch, rootOffsets[i], &stem, &index)))
-      return NULL;
-    root = (JFT_Root *)(scratch->data + rootOffsets[i]);
-    root->extent = scratch->mark - rootOffsets[i];
-    root->numIndices = 1;
-    root->maxIndices = 1;
-    root->maxKeySize = stem.size;
-  }
 
-  JFT_Cursor cursors[num];
-  for (JFT_Amount i = 0; i < num; i++)
-    cursors[i] = JFT_cursor((JFT *)(scratch->data + rootOffsets[i]));
-  return JFT_cursor_merge_new(cursors, num, output, JFT_FLAGS_ATOM);
+    if (k == 0) {
+      if (!(make_root(scratch)))
+        return NULL;
+      if (!(make_leaf(scratch, 0, &stem, value)))
+        return NULL;
+      root = (JFT_Root *)(scratch->data);
+      root->extent = scratch->mark;
+      root->numPrimary = 1;
+      root->maxKeySize = stem.size;
+      rootOffsets[0] = 0;
+      num--;
+    } else {
+      root = (JFT_Root *)(output->data);
+      if (!(BUF_HAS(scratch, output->mark)))
+        return NULL;
+      if (!(BUF_CPY(scratch, output->data, output->mark)))
+        return NULL;
+    }
+
+    JFT_Leaf index = JFTV(root->primaryOffset);
+    for (JFT_Count i = 1; i < batch; i++, k++) {
+      rootOffsets[i] = scratch->mark;
+      stem.pre = JFT_SYMBOL_INDICES;
+      stem.size = indices[k].size + !indices[k].pre;
+      stem.data = indices[k].data;
+      if (!(make_root(scratch)))
+        return NULL;
+      if (!(make_leaf(scratch, rootOffsets[i], &stem, &index)))
+        return NULL;
+      root = (JFT_Root *)(scratch->data + rootOffsets[i]);
+      root->extent = scratch->mark - rootOffsets[i];
+      root->numIndices = 1;
+      root->maxIndices = 1;
+      root->maxKeySize = stem.size;
+      num--;
+    }
+
+    for (JFT_Amount i = 0; i < batch; i++)
+      cursors[i] = JFT_cursor((JFT *)(scratch->data + rootOffsets[i]));
+    atom = JFT_cursor_merge_new(cursors, batch, output, JFT_FLAGS_ATOM);
+    batch = MIN(num + 1, JFT_MASK_CAPACITY);
+  } while (atom && num);
+  return atom;
 }
 
 /* Iterators */
