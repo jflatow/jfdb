@@ -3,13 +3,6 @@
 
 #include "trie.h"
 
-#define BUF_CLR(buf)       (buf->mark = 0, buf)
-#define BUF_HAS(buf, more) (buf->ensure(buf, more) == Ok ? buf : NULL)
-#define BUF_SET(buf, type, obj)                                         \
-  ((*(type *)(buf->data + buf->mark) = (obj)), buf->mark += sizeof(type))
-#define BUF_CPY(buf, ptr, size)                                         \
-  (memcpy(buf->data + buf->mark, (ptr), size), buf->mark += size)
-
 JFT_Symbol JFT_cursor_init(JFT_Cursor *cursor, JFT_Phase phase, JFT *node) {
   // initialize the cursor at node, if it exists, and return the symbol
   // we assume non-root branches always have children
@@ -248,12 +241,12 @@ static inline void write_node(JFT_Buffer *buf,
                               JFT_Offset parentOffset) {
   // take care of the common node head + stem details for leaves & branches
   if (stem->pre) {
-    BUF_SET(buf, JFT_Head, JFT_head(nodeType, stem->pre, stem->size, typeInfo, parentOffset));
-    BUF_SET(buf, uint8_t, JFT_SpToB(stem->pre));
-    BUF_CPY(buf, stem->data, stem->size - 1);
+    JFT_buffer_equal(buf, JFT_Head, JFT_head(nodeType, stem->pre, stem->size, typeInfo, parentOffset));
+    JFT_buffer_equal(buf, uint8_t, JFT_SpToB(stem->pre));
+    JFT_buffer_paste(buf, stem->data, stem->size - 1);
   } else {
-    BUF_SET(buf, JFT_Head, JFT_head(nodeType, stem->pre, stem->size, typeInfo, parentOffset));
-    BUF_CPY(buf, stem->data, stem->size);
+    JFT_buffer_equal(buf, JFT_Head, JFT_head(nodeType, stem->pre, stem->size, typeInfo, parentOffset));
+    JFT_buffer_paste(buf, stem->data, stem->size);
   }
 }
 
@@ -268,9 +261,9 @@ static inline JFT_Offset offset_parent(JFT_Buffer *buf,
 
 static inline JFT_Offset make_root(JFT_Buffer *buf) {
   // just make space, as a root head initializes to nil (technically an impl detail)
-  if (!BUF_HAS(buf, sizeof(JFT_Root)))
+  if (!JFT_buffer_ample(buf, sizeof(JFT_Root)))
     return 0;
-  return BUF_SET(buf, JFT_Root, (JFT_Root) {.head = JFT_head(Root, False, 0, 0, 0)});
+  return JFT_buffer_equal(buf, JFT_Root, (JFT_Root) {.head = JFT_head(Root, False, 0, 0, 0)});
 }
 
 static inline JFT_Offset make_scan_list(JFT_Buffer *buf,
@@ -280,7 +273,7 @@ static inline JFT_Offset make_scan_list(JFT_Buffer *buf,
                                         int numSymbols) {
   // first create the list of symbols for searching, then the list of offsets
   JFT_Offset size = JFT_scan_size(stem->size, numSymbols);
-  if (!BUF_HAS(buf, size))
+  if (!JFT_buffer_ample(buf, size))
     return 0;
 
   JFT_Offset parentOffset = offset_parent(buf, parentPos, stem);
@@ -289,10 +282,10 @@ static inline JFT_Offset make_scan_list(JFT_Buffer *buf,
   uint64_t word;
   for (int w = 0; w < 4; w++)
     for (int b = ffsll(word = (*symbols)[w]); b; b = ffsll(word &= word - 1))
-      BUF_SET(buf, uint8_t, 64 * w + b - 1);
+      JFT_buffer_equal(buf, uint8_t, 64 * w + b - 1);
 
   for (int i = 0; i < numSymbols; i++)
-    BUF_SET(buf, JFT_Offset, 0);
+    JFT_buffer_equal(buf, JFT_Offset, 0);
 
   return size;
 }
@@ -304,14 +297,14 @@ static inline JFT_Offset make_jump_table(JFT_Buffer *buf,
   // just create an offset for each symbol in the range
   int rangeSize = JumpTableRanges[rangeId].max - JumpTableRanges[rangeId].min + 1;
   JFT_Offset size = JFT_jump_size(stem->size, rangeSize);
-  if (!BUF_HAS(buf, size))
+  if (!JFT_buffer_ample(buf, size))
     return 0;
 
   JFT_Offset parentOffset = offset_parent(buf, parentPos, stem);
   write_node(buf, JumpTable, stem, rangeId, parentOffset);
 
   for (int i = 0; i < rangeSize; i++)
-    BUF_SET(buf, JFT_Offset, 0);
+    JFT_buffer_equal(buf, JFT_Offset, 0);
 
   return size;
 }
@@ -350,7 +343,7 @@ static inline JFT_Offset prep_leaf(JFT_Buffer *buf,
   // write the node, although it may be updated later
   // ensure space for maxWords and return a pointer where one can write words
   JFT_Offset size = JFT_leaf_size(stem->size, maxWords);
-  if (!BUF_HAS(buf, size))
+  if (!JFT_buffer_ample(buf, size))
     return 0;
 
   JFT_Offset parentOffset = offset_parent(buf, parentPos, stem);
@@ -359,7 +352,7 @@ static inline JFT_Offset prep_leaf(JFT_Buffer *buf,
     write_node(buf, Leaf, stem, maxWords, parentOffset);
   } else {
     write_node(buf, Leaf, stem, 0xFF, parentOffset);
-    BUF_SET(buf, JFT_Count, maxWords);
+    JFT_buffer_equal(buf, JFT_Count, maxWords);
   }
 
   return size;
@@ -386,7 +379,7 @@ static inline JFT_Offset make_leaf(JFT_Buffer *buf,
   // write the node and copy all the leaf data words into the buffer
   JFT_Offset size = prep_leaf(buf, parentPos, stem, leaf->size);
   for (int i = 0; i < leaf->size; i++)
-    BUF_SET(buf, JFT_Word, leaf->data[i]);
+    JFT_buffer_equal(buf, JFT_Word, leaf->data[i]);
   return size;
 }
 
@@ -508,7 +501,7 @@ static JFT_Status splice_new(JFT_Cursor *cursors,
       // write the indices, count the actual words
       JFT_Iter i = JFT_iter_any(cons->iters, frame->active ^ active);
       do {
-        BUF_CPY(buf, i.batch.data, i.batch.size * sizeof(JFT_Word));
+        JFT_buffer_paste(buf, i.batch.data, i.batch.size * sizeof(JFT_Word));
         numWords += i.batch.size;
       } while (JFT_iter_next(&i));
 
@@ -558,7 +551,7 @@ JFT *JFT_cursor_merge_new(JFT_Cursor *cursors,
                           int flags) {
   // perform a cursor merge to produce a new trie
   // if 'atoms' are the base case, this is the induction step
-  JFT_Cons cons = (JFT_Cons) {.buffer = BUF_CLR(output)};
+  JFT_Cons cons = (JFT_Cons) {.buffer = JFT_buffer_reset(output)};
   JFT_Status result = JFT_cursor_merge(cursors, num, splice_new, &cons, flags);
   free(cons.stem.data);
   free(cons.iters);
@@ -594,7 +587,7 @@ JFT *JFT_atom(const JFT_Stem *restrict primary,
   };
 
   do {
-    if (!(BUF_CLR(scratch)))
+    if (!(JFT_buffer_reset(scratch)))
       return NULL;
 
     if (k == 0) {
@@ -610,9 +603,7 @@ JFT *JFT_atom(const JFT_Stem *restrict primary,
       num--;
     } else {
       root = (JFT_Root *)(output->data);
-      if (!(BUF_HAS(scratch, output->mark)))
-        return NULL;
-      if (!(BUF_CPY(scratch, output->data, output->mark)))
+      if (!JFT_buffer_write(scratch, output->data, output->mark))
         return NULL;
     }
 

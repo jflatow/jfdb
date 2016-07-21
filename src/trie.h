@@ -774,6 +774,30 @@ static inline JFT_Iter JFT_iter_but(JFT_Iter *iters, JFT_Mask active) {
 
 /* Buffers */
 
+#define JFT_buffer_equal(buf, type, obj)                                         \
+  ((*(type *)(buf->data + buf->mark) = (obj)), buf->mark += sizeof(type))
+
+static inline size_t JFT_buffer_paste(JFT_Buffer *buf, void *ptr, size_t size) {
+  memcpy(buf->data + buf->mark, ptr, size);
+  return buf->mark += size;
+}
+
+static inline JFT_Buffer *JFT_buffer_ample(JFT_Buffer *buf, size_t more) {
+  return buf->ensure(buf, more) == Ok ? buf : NULL;
+}
+
+static inline JFT_Buffer *JFT_buffer_reset(JFT_Buffer *buf) {
+  buf->mark = 0;
+  return buf;
+}
+
+static inline JFT_Buffer *JFT_buffer_write(JFT_Buffer *buf, void *ptr, size_t size) {
+  if (!JFT_buffer_ample(buf, size))
+    return NULL;
+  JFT_buffer_paste(buf, ptr, size);
+  return buf;
+}
+
 JFT_Buffer *JFT_membuf();
 JFT_Buffer *JFT_membuf_free(JFT_Buffer *buf);
 

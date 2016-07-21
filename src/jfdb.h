@@ -73,7 +73,6 @@ typedef struct {
   char errstr[JFDB_MAX_ERRSTR];
   int error;
   int flags;
-  int laterality;
   JFDB_MMap kmap;
   JFDB_MMap vmap;
   JFDB_Header tip;

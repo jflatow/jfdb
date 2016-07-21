@@ -13,7 +13,7 @@
 
 #define NBLOCKS(size) (RUP(size, JFDB_BLOCK_SIZE))
 
-int JFDB_file_open(JFDB *db, const char *path) {
+static int JFDB_file_open(JFDB *db, const char *path) {
   // get the fd for keys & vals, and sanity check that they look like valid files
   // vals has a different header, but the magic / version are the same
   int fd;
@@ -41,7 +41,7 @@ int JFDB_file_open(JFDB *db, const char *path) {
   return fd;
 }
 
-int JFDB_mmap_file(JFDB *db, int kv, size_t cover, int factor) {
+static int JFDB_mmap_file(JFDB *db, int kv, size_t cover, int factor) {
   // if the mmap already includes cover, do nothing
   // otherwise increase the mapping by a size of factor
   JFDB_MMap *m = kv == JFDB_KEYS ? &db->kmap : &db->vmap;
@@ -71,7 +71,7 @@ int JFDB_mmap_file(JFDB *db, int kv, size_t cover, int factor) {
   return 1;
 }
 
-void JFDB_mmap_free(JFDB *db, int kv) {
+static void JFDB_mmap_free(JFDB *db, int kv) {
   JFDB_MMap *m = kv == JFDB_KEYS ? &db->kmap : &db->vmap;
   if (m->map != MAP_FAILED)
     munmap(m->map, m->size);
@@ -131,6 +131,61 @@ static void JFDB_vfree(JFDB *db, JFDB_Region region) {
 
 static size_t JFDB_voffset(JFDB_Region region) {
   return region.block * JFDB_BLOCK_SIZE;
+}
+
+static JFDB *JFDB_mark_dirty(JFDB *db, const JFT *tx, JFT_Offset prior) {
+  // look for collisions in the old keys
+  // if we find any, dirty them, and deallocate the regions
+  JFT_Cursor txCursor = JFT_cursor((JFT *)tx), otherCursor;
+  JFT_Stem stem = (JFT_Stem) {
+    .pre = JFT_SYMBOL_PRIMARY,
+    .size = 1,
+    .data = db->keyData
+  };
+  JFT_Keys keys = JFT_keys(&txCursor, &stem, Forward);
+  while (JFT_keys_next(&keys)) {
+    // walk the tries from prior, all the way to the base
+    // it is crucial to start from the prior offset
+    // so that we free regions even in tries that have become obsolete
+    JFT *trie;
+    for (JFT_Offset pos = prior; pos; pos = JFT_parent_offset(trie)) {
+      trie = JFDB_get_trie(db, pos);
+      JFT_cursor_init(&otherCursor, In, trie);
+      // if we fall off the trie, we should continue the search backwards
+      if (JFT_cursor_find(&otherCursor, keys.stem) == JFT_SYMBOL_NIL)
+        continue;
+      // otherwise, this trie overlaps the key: we need to clobber
+      if (JFT_node_type(otherCursor.node) == Leaf) {
+        // we can stop after we hit a leaf:
+        //  a leaf must have already dirtied and freed its ancestors
+        // if its already dirty, do nothing (so we don't double free)
+        // NB: this can happen e.g. if two longer keys clobber a prefix
+        if (!JFT_is_dirty(otherCursor.node)) {
+          JFT_set_dirty((JFT *)otherCursor.node, True);
+          JFT_Leaf leaf = JFT_leaf(otherCursor.node);
+          if (leaf.size)
+            JFDB_vfree(db, *(JFDB_Region *)leaf.data);
+          break;
+        }
+      } else {
+        // we have to dirty and free all leaves in any branches we clobber
+        // and then we still need to continue searching ancestors
+        // NB: scratch[0] is guaranteed to be be big enough for keys of tx
+        //     we know because we already merged (at least) tx into it
+        JFT_Stem subStem = (JFT_Stem) {.data = db->scratch[0]->data};
+        JFT_Keys subKeys = JFT_keys(&otherCursor, &subStem, Forward);
+        while (JFT_keys_next(&subKeys)) {
+          if (!JFT_is_dirty(otherCursor.node)) {
+            JFT_set_dirty((JFT *)otherCursor.node, True);
+            JFT_Leaf leaf = JFT_leaf(otherCursor.node);
+            if (leaf.size)
+              JFDB_vfree(db, *(JFDB_Region *)JFT_leaf(otherCursor.node).data);
+          }
+        }
+      }
+    }
+  }
+  return db;
 }
 
 JFDB *JFDB_open(const char *path, int flags) {
@@ -200,61 +255,6 @@ JFDB *JFDB_close(JFDB *db) {
   free(db->path);
   free(db);
   return NULL;
-}
-
-JFDB *JFDB_mark_dirty(JFDB *db, const JFT *tx, JFT_Offset prior) {
-  // look for collisions in the old keys
-  // if we find any, dirty them, and deallocate the regions
-  JFT_Cursor txCursor = JFT_cursor((JFT *)tx), otherCursor;
-  JFT_Stem stem = (JFT_Stem) {
-    .pre = JFT_SYMBOL_PRIMARY,
-    .size = 1,
-    .data = db->keyData
-  };
-  JFT_Keys keys = JFT_keys(&txCursor, &stem, Forward);
-  while (JFT_keys_next(&keys)) {
-    // walk the tries from prior, all the way to the base
-    // it is crucial to start from the prior offset
-    // so that we free regions even in tries that have become obsolete
-    JFT *trie;
-    for (JFT_Offset pos = prior; pos; pos = JFT_parent_offset(trie)) {
-      trie = JFDB_get_trie(db, pos);
-      JFT_cursor_init(&otherCursor, In, trie);
-      // if we fall off the trie, we should continue the search backwards
-      if (JFT_cursor_find(&otherCursor, keys.stem) == JFT_SYMBOL_NIL)
-        continue;
-      // otherwise, this trie overlaps the key: we need to clobber
-      if (JFT_node_type(otherCursor.node) == Leaf) {
-        // we can stop after we hit a leaf:
-        //  a leaf must have already dirtied and freed its ancestors
-        // if its already dirty, do nothing (so we don't double free)
-        // NB: this can happen e.g. if two longer keys clobber a prefix
-        if (!JFT_is_dirty(otherCursor.node)) {
-          JFT_set_dirty((JFT *)otherCursor.node, True);
-          JFT_Leaf leaf = JFT_leaf(otherCursor.node);
-          if (leaf.size)
-            JFDB_vfree(db, *(JFDB_Region *)leaf.data);
-          break;
-        }
-      } else {
-        // we have to dirty and free all leaves in any branches we clobber
-        // and then we still need to continue searching ancestors
-        // NB: scratch[0] is guaranteed to be be big enough for keys of tx
-        //     we know because we already merged (at least) tx into it
-        JFT_Stem subStem = (JFT_Stem) {.data = db->scratch[0]->data};
-        JFT_Keys subKeys = JFT_keys(&otherCursor, &subStem, Forward);
-        while (JFT_keys_next(&subKeys)) {
-          if (!JFT_is_dirty(otherCursor.node)) {
-            JFT_set_dirty((JFT *)otherCursor.node, True);
-            JFT_Leaf leaf = JFT_leaf(otherCursor.node);
-            if (leaf.size)
-              JFDB_vfree(db, *(JFDB_Region *)JFT_leaf(otherCursor.node).data);
-          }
-        }
-      }
-    }
-  }
-  return db;
 }
 
 JFDB *JFDB_write(JFDB *db, const JFT *tx, int flags) {
