@@ -28,7 +28,8 @@
          query/2,
          query/3,
          flush/1,
-         crush/1]).
+         crush/1,
+         close/1]).
 
 -export([call/3]).
 
@@ -126,10 +127,10 @@ wait(DB) ->
 open(Path) ->
     open(Path, []).
 
-open(Path, Args) when is_binary(Path) ->
-    open(binary_to_list(Path), Args);
-open(Path, Args) ->
-    jfdb_nif:open(Path, Args).
+open(Path, Opts) when is_binary(Path) ->
+    open(binary_to_list(Path), Opts);
+open(Path, Opts) ->
+    jfdb_nif:open(Path, Opts).
 
 call(DB, Method, Args) ->
     case jfdb_nif:call(DB, Method, Args) of
@@ -177,6 +178,9 @@ flush(DB) ->
 
 crush(DB) ->
     call(DB, crush, {}).
+
+close(DB) ->
+    call(DB, close, {}).
 
 paths(DB) ->
     paths(DB, []).

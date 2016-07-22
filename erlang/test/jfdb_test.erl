@@ -1,30 +1,25 @@
-#!/usr/bin/env escript
-%% -*- erlang -*-
-%%! -pa ebin
+-module(jfdb_test).
 
-main([Path, "search"|KeyPath]) ->
-    DB = jfdb:open(Path),
-    io:format("~p~n", [jfdb:search(DB, KeyPath)]);
-main([Path, "lookup", Num]) ->
-    DB = jfdb:open(Path),
-    lists:foldl(
-      fun (X, _) ->
-              jfdb:lookup(DB, [l(X rem 10), l(X)])
-      end, [], lists:seq(1, i(Num))),
-    lists:foldl(
-      fun (X, _) ->
-              jfdb:lookup(DB, [l(X rem 10), l(X rem 10), l(X)])
-      end, [], lists:seq(1, i(Num)));
-main([Path, "assign", Num]) ->
-    DB = jfdb:open(Path),
+-include_lib("eunit/include/eunit.hrl").
+
+l(I) when is_integer(I) ->
+    integer_to_list(I).
+
+basic_test() ->
+    basic_test(1000).
+
+basic_test(N) ->
+    check_basic(N, store_basic(N, jfdb:open("basic_test", [temporary]))).
+
+store_basic(N, DB = {jfdb, _}) ->
     DB = lists:foldl(
            fun (X, D) when D =:= DB ->
                    jfdb:assign(DB, [l(X rem 10), l(X)], #{map => X})
-           end, DB, lists:seq(1, i(Num))),
+           end, DB, lists:seq(1, N)),
     DB = lists:foldl(
            fun (X, D) when D =:= DB ->
                    jfdb:assign(DB, [l(X rem 10), l(X rem 10), l(X)], #{map => X})
-           end, DB, lists:seq(1, i(Num))),
+           end, DB, lists:seq(1, N)),
     DB = jfdb:assign(DB, key, val, [i1]),
     DB = jfdb:assign(DB, <<"this is a key">>, #{fancy => <<"this is a val">>}, [a, x, y, z]),
     DB = jfdb:assign(DB, [this, is, a, path], not_that_fancy, [x, y, z]),
@@ -37,8 +32,9 @@ main([Path, "assign", Num]) ->
     DB = jfdb:assign(DB, k5, v5, [[place, p2]]),
     DB = jfdb:flush(DB).
 
-l(I) when is_integer(I) ->
-    integer_to_list(I).
-
-i(L) when is_list(L) ->
-    list_to_integer(L).
+check_basic(N, DB) ->
+    lists:foldl(
+      fun (X, _) ->
+              ?assertEqual(jfdb:lookup(DB, [l(X rem 10), l(X rem 10), l(X)]), #{map => X})
+      end, [], lists:seq(1, N)),
+    DB.

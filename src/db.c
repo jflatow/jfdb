@@ -71,13 +71,18 @@ static int JFDB_mmap_file(JFDB *db, int kv, size_t cover, int factor) {
   return 1;
 }
 
-static void JFDB_mmap_free(JFDB *db, int kv) {
+static void JFDB_mmap_release(JFDB *db, int kv) {
   JFDB_MMap *m = kv == JFDB_KEYS ? &db->kmap : &db->vmap;
   if (m->map != MAP_FAILED)
     munmap(m->map, m->size);
   if (m->fd >= 0)
     close(m->fd);
   m->size = 0;
+}
+
+static void JFDB_mbuf_release(JFDB *db, int id) {
+  if (db->scratch[id])
+    db->scratch[id] = JFT_membuf_free(db->scratch[id]);
 }
 
 static JFDB_Region JFDB_valloc(JFDB *db, size_t size) {
@@ -188,6 +193,31 @@ static JFDB *JFDB_mark_dirty(JFDB *db, const JFT *tx, JFT_Offset prior) {
   return db;
 }
 
+int JFDB_wipe(const char *path) {
+  // remove keys & vals, flag if either one fails
+  int failed = 0;
+  char fp[JFDB_MAX_PATH + 6];
+  snprintf(fp, sizeof(fp), "%s.keys", path);
+  switch (remove(fp)) {
+    case 0:
+    case ENOENT:
+      break;
+    default:
+      failed |= JFDB_KEYS;
+      break;
+  }
+  snprintf(fp, sizeof(fp), "%s.vals", path);
+  switch (remove(fp)) {
+    case 0:
+    case ENOENT:
+      break;
+    default:
+      failed |= JFDB_VALS;
+      break;
+  }
+  return failed;
+}
+
 JFDB *JFDB_open(const char *path, int flags) {
   JFDB *db = calloc(1, sizeof(JFDB));
   int len = strlen(path);
@@ -244,14 +274,25 @@ JFDB *JFDB_open(const char *path, int flags) {
 }
 
 JFDB *JFDB_close(JFDB *db) {
+  // NB: after calling close, it is not safe to call any other db operations
+  //     however, if close fails, it is safe to try and call close again
   // if for some strange reason we can't flush, don't free our resources yet
   if (db->isModified)
     if (JFDB_has_error(JFDB_flush(db)))
       return db;
-  JFDB_mmap_free(db, JFDB_KEYS);
-  JFDB_mmap_free(db, JFDB_VALS);
-  JFT_membuf_free(db->scratch[0]);
-  JFT_membuf_free(db->scratch[1]);
+
+  // release the mmaps and buffers
+  JFDB_mmap_release(db, JFDB_KEYS);
+  JFDB_mmap_release(db, JFDB_VALS);
+  JFDB_mbuf_release(db, 0);
+  JFDB_mbuf_release(db, 1);
+
+  // possibly wipe the files, not normally failable as we just had the path open
+  if (db->flags & JFDB_TEMPORARY)
+    if (JFDB_wipe(db->path))
+      return JFDB_set_error(db, JFDB_EFILE, "failed to wipe files");
+
+  // completely free
   free(db->path);
   free(db);
   return NULL;
@@ -452,7 +493,7 @@ JFDB *JFDB_compact(JFDB *db, const JFT *tx) {
     return JFDB_set_error(db, JFDB_ETRIE, "failed to calculate gaps");
 
   // release the old file
-  JFDB_mmap_free(db, JFDB_KEYS);
+  JFDB_mmap_release(db, JFDB_KEYS);
 
   // produce the new file
   char fp[JFDB_MAX_PATH + 6];

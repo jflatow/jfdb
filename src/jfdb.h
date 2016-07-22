@@ -19,7 +19,8 @@
 #define JFDB_EMMAP        5
 #define JFDB_ETRIE        6
 
-#define JFDB_FLUSH        1
+#define JFDB_TEMPORARY    0b0001  // open flag
+#define JFDB_FLUSH        0b0001  // write flag
 
 #define JFDB_MAX_FREE     256
 #define JFDB_MAX_ERRSTR   128
@@ -82,6 +83,10 @@ typedef struct {
   JFT_Buffer *scratch[2];
   uint8_t keyData[JFT_KEY_LIMIT];
 } JFDB;
+
+/* Crude API */
+
+int JFDB_wipe(const char *path);
 
 /* Basic API */
 

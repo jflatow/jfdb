@@ -77,7 +77,8 @@ static int usage(int isError) {
           " jfdb meta /db/path\n"
           " jfdb node /db/path [offset]\n"
           " jfdb keys /db/path [-n] [-p|-i] [prefix]\n"
-          " jfdb find /db/path [-n] [-p|-i] [prefix]\n");
+          " jfdb find /db/path [-n] [-p|-i] [prefix]\n"
+          " jfdb wipe /db/path\n");
   return isError;
 }
 
@@ -150,36 +151,47 @@ int main(int argc, char **argv) {
     return usage(-1);
 
   char *cmd = argv[1];
-  JFDB *db = JFDB_open(argv[2], 0);
-  if (JFDB_pif_error(db, "Failed to open"))
-    return -1;
-
   char *keyData[JFT_KEY_LIMIT];
+  JFDB *db;
   JFT_Stem prefix = (JFT_Stem) {.data = (uint8_t *)keyData};
   JFT_Symbol *stop = NULL;
   JFT_Offset offset;
   switch (cmd[0]) {
     case 'm':
-      print_meta(db);
-      break;
     case 'n':
-      offset = argc > 3 ? atoi(argv[3]) : db->tip.cp.offset;
-      offset = MAX(offset, sizeof(JFDB_Header));
-      print_info(db, &prefix, db->kmap.map + offset, &null);
-      break;
     case 'k':
-      if (!prefix_opts(&prefix, &stop, argc - 2, argv + 2))
-        print_keys(db, &prefix, stop);
-      break;
     case 'f':
-      if (!prefix_opts(&prefix, &stop, argc - 2, argv + 2))
-        print_find(db, &prefix, stop);
+      db = JFDB_open(argv[2], 0);
+      if (JFDB_pif_error(db, "Failed to open"))
+        return -1;
+      switch (cmd[0]) {
+        case 'm':
+          print_meta(db);
+          break;
+        case 'n':
+          offset = argc > 3 ? atoi(argv[3]) : db->tip.cp.offset;
+          offset = MAX(offset, sizeof(JFDB_Header));
+          print_info(db, &prefix, db->kmap.map + offset, &null);
+          break;
+        case 'k':
+          if (!prefix_opts(&prefix, &stop, argc - 2, argv + 2))
+            print_keys(db, &prefix, stop);
+          break;
+        case 'f':
+          if (!prefix_opts(&prefix, &stop, argc - 2, argv + 2))
+            print_find(db, &prefix, stop);
+          break;
+      }
+      if (JFDB_close(db))
+        return -1;
+      break;
+    case 'w':
+      if (pif_error(JFDB_wipe(argv[2]), "Failed to wipe"))
+        return -1;
       break;
     default:
       usage(1);
       break;
   }
-
-  JFDB_close(db);
   return 0;
 }

@@ -21,16 +21,18 @@
 #define ATOM_JFDB          ATOM("jfdb")
 #define ATOM_OK            ATOM("ok")
 #define ATOM_UNDEFINED     ATOM("undefined")
+#define ATOM_TEMPORARY     ATOM("temporary")
 #define ATOM_BADARG        ATOM("badarg")
 #define ATOM_EALLOC        ATOM("ealloc")
 #define ATOM_ERROR         ATOM("error")
-#define ATOM_FLUSH         ATOM("flush")
-#define ATOM_CRUSH         ATOM("crush")
 #define ATOM_FETCH         ATOM("fetch")
 #define ATOM_ANNUL         ATOM("annul")
 #define ATOM_STORE         ATOM("store")
 #define ATOM_QUERY         ATOM("query")
 #define ATOM_LIMIT         ATOM("limit")
+#define ATOM_FLUSH         ATOM("flush")
+#define ATOM_CRUSH         ATOM("crush")
+#define ATOM_CLOSE         ATOM("close")
 #define ATOM_PRIMARY       ATOM("primary")
 #define ATOM_INDICES       ATOM("indices")
 #define ATOM_KEYS          ATOM("keys")
@@ -52,7 +54,6 @@ typedef ERL_NIF_TERM (*ErlJFDBFn)(ErlJFDB *, message *);
 
 struct ErlJFDB {
   ErlNifTid tid;
-  ErlNifThreadOpts *opts;
   JFDB *db;
   queue *msgs;
   uint8_t kdata[2][JFT_KEY_LIMIT]; // NB: trade fixed cost for less malloc
@@ -229,6 +230,21 @@ affix_primary(ErlJFDBSub *subj, ErlNifBinary *bin) {
 /* JFDB */
 
 static int
+ErlJFDB_open_flags(ErlNifEnv *env, const ERL_NIF_TERM opts) {
+  int flags = 0;
+  ERL_NIF_TERM head, tail = opts;
+  if (!enif_is_list(env, opts))
+    return -1;
+  while (enif_get_list_cell(env, tail, &head, &tail)) {
+    if (TERM_EQ(head, ATOM_TEMPORARY))
+      flags |= JFDB_TEMPORARY;
+    else
+      return -1;
+  }
+  return flags;
+}
+
+static int
 ErlJFDB_write_flags(ErlNifEnv *env, const ERL_NIF_TERM opts) {
   int flags = 0;
   ERL_NIF_TERM head, tail = opts;
@@ -267,7 +283,6 @@ ErlJFDB_run(void *res) {
   }
 
   JFDB_close(jfdb->db);
-  enif_thread_opts_destroy(jfdb->opts);
   queue_free(q);
 
   return NULL;
@@ -282,9 +297,7 @@ ErlJFDB_start(ErlNifEnv *env) {
     goto error;
   if (!(jfdb->msgs = queue_new()))
     goto error;
-  if (!(jfdb->opts = enif_thread_opts_create("jfdb_opts")))
-    goto error;
-  if (enif_thread_create("jfdb", &jfdb->tid, &ErlJFDB_run, jfdb, jfdb->opts))
+  if (enif_thread_create("jfdb", &jfdb->tid, &ErlJFDB_run, jfdb, NULL))
     goto error;
   return jfdb;
 
@@ -732,6 +745,15 @@ ErlJFDB_crush_async(ErlJFDB *jfdb, message *msg) {
 }
 
 static ERL_NIF_TERM
+ErlJFDB_close_async(ErlJFDB *jfdb, message *msg) {
+  ErlNifEnv *env = msg->env;
+  if (jfdb->db)
+    if ((jfdb->db = JFDB_close(jfdb->db)))
+        return ASYNC(ERROR_JFDB(jfdb));
+  return ASYNC(ATOM_OK);
+}
+
+static ERL_NIF_TERM
 ErlJFDB_open(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
   ErlJFDB *jfdb;
   if (!(jfdb = ErlJFDB_start(env)))
@@ -740,9 +762,11 @@ ErlJFDB_open(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
   unsigned size;
   if (enif_get_list_length(env, argv[0], &size)) {
     char path[size + 1];
-    int flags = 0;
+    int flags;
     if (enif_get_string(env, argv[0], path, size + 1, ERL_NIF_LATIN1) != size + 1)
       return ERROR_BADARG;
+    if ((flags = ErlJFDB_open_flags(env, argv[1])) < 0)
+    return ASYNC(ERROR_BADARG);
     if (!(jfdb->db = JFDB_open(path, flags)))
       return ERROR_EALLOC;
     if (JFDB_has_error(jfdb->db))
@@ -783,6 +807,8 @@ ErlJFDB_call(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
     msg = message_new(env, &ErlJFDB_flush_async, subj, argv[2]);
   else if (TERM_EQ(argv[1], ATOM_CRUSH))
     msg = message_new(env, &ErlJFDB_crush_async, subj, argv[2]);
+  else if (TERM_EQ(argv[1], ATOM_CLOSE))
+    msg = message_new(env, &ErlJFDB_close_async, subj, argv[2]);
   else
     return ERROR_BADARG;
 
