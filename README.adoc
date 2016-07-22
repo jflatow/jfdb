@@ -245,7 +245,7 @@ So is searching:
 [{<<"k2">>,v2},{<<"k1">>,v1}]
 ----
 
-Notice how when searching, the return items are not always in order.
+Notice how when searching, the returned items are not always in order.
 If you are searching for a single index key, the order is guaranteed.
 All bets are off when performing complex queries over multiple keys.
 
@@ -253,7 +253,7 @@ We can search prefix paths too.
 Another way to restate the last query we executed could be:
 
 ----
-> jfdb:search(DB, {but, [[time], [place, p2]]}).
+> jfdb:search(DB, {but, [time, [place, p2]]}).
 [{<<"k2">>,v2},{<<"k1">>,v1}]
 ----
 
@@ -327,7 +327,8 @@ But here are some quick tests from the root directory of `JFDB`.
 time test/jfdb test-db
 ----
 
-That's using the `C` API, and on my MacBook Pro I get *~30-40K* writes per second.
+That test uses the `C` API to write just over 10,000 values.
+On my MacBook Pro I get *~30-40K* writes per second.
 
 Using the `Erlang` API:
 
