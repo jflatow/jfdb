@@ -198,7 +198,8 @@ int JFDB_wipe(const char *path) {
   int failed = 0;
   char fp[JFDB_MAX_PATH + 6];
   snprintf(fp, sizeof(fp), "%s.keys", path);
-  switch (remove(fp)) {
+  remove(fp);
+  switch (errno) {
     case 0:
     case ENOENT:
       break;
@@ -207,7 +208,8 @@ int JFDB_wipe(const char *path) {
       break;
   }
   snprintf(fp, sizeof(fp), "%s.vals", path);
-  switch (remove(fp)) {
+  remove(fp);
+  switch (errno) {
     case 0:
     case ENOENT:
       break;
@@ -427,9 +429,9 @@ JFDB *JFDB_crush(JFDB *db) {
   // compact the DB (only) if there are multiple levels
   // NB: this doesn't guarantee nothing would change if we were to compact
   //     e.g. currently it may take multiple compactions to optimize branches after pruning
-  if (db->tip.cp.levels == 0)
-    return db;
-  return JFDB_compact(db, NULL);
+  if (db->tip.cp.levels > 1)
+    return JFDB_compact(db, NULL);
+  return db;
 }
 
 static JFDB *JFDB_calculate_gaps(JFDB *db, const JFT *trie) {
@@ -507,7 +509,7 @@ JFDB *JFDB_compact(JFDB *db, const JFT *tx) {
   // write the new header: base the level on the # primary keys
   db->tip.level = flsll(((JFT_Root *)next)->numPrimary);
   cp->lengthKeys = sizeof(JFDB_Header) + buf->mark + 1;
-  cp->levels = 0;
+  cp->levels = 1;
   cp->offset = sizeof(JFDB_Header);
   if (pwrite(db->kmap.fd, &db->tip, sizeof(JFDB_Header), 0) < sizeof(JFDB_Header))
     return JFDB_set_error(db, JFDB_EFILE, "failed to write compact keys header");
