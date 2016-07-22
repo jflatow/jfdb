@@ -1,0 +1,373 @@
+= JFDB
+:Author: Jared Flatow
+
+WARNING: `JFDB` is experimental technology.
+         There may be breaking changes to the API.
+         There may be serious bugs (none currently known, please report if you discover any).
+         Use at your own risk.
+
+[[about]]
+== What is it?
+
+`JFDB` is a database library written in `C`, but designed primarily for use in `Erlang`.
+That is to say, the interface and architecture were designed to match the impedance of `Erlang`,
+and also to fill a missing sweet spot in the `Erlang` ecosystem.
+That is not to say that it isn't useful in other languages, or that the `C` interface is not usable.
+
+`JFDB` aims to provide:
+
+ - Searchability
+ - Flexibility
+ - Persistence
+ - Performance
+ - Convenience
+ - Fault tolerance
+
+The conceptual model for `JFDB` looks something like this:
+
+----
+ primary => value <= [indices, ...]
+----
+
+This is the atomic primitive unit of storage provided by `JFDB`.
+All the keys (primary and indices) are compressed using an adaptive trie implementation called a `JFT`.
+
+`JFDB` allows you to lookup values by primary key.
+A conceptual model for data retrieval looks something like:
+
+----
+ primary => value | undefined
+----
+
+Or you may search using logical combinations of the index keys, e.g.:
+
+----
+ {any, [i1, {all, [i2, i3]}, {but, [i4, i5]}]} => [v1, v2, ...]
+----
+
+In addition, `JFDB` can do magical things with key prefixes (see <<usage>>).
+
+`JFDB` never mutates data in place, so in a certain sense it cannot be corrupted.
+If you are familiar with log-structured merge trees, you could think of `JFDB` as a log-structured merge __tr**i**e__.
+Compared to something like `LevelDB` however, `JFDB` has much less overhead.
+
+A database instance is extremely lightweight, consisting of 2 (sometimes 3) files.
+For a better understanding of how it works, please read <<implementation>>
+
+[[usage]]
+== How do I use it?
+
+First off, you need to get the code and build it:
+
+----
+$ make
+----
+
+From here on out, we'll be talking mainly about the `Erlang` bindings, not the `C` API or command-line interface.
+First, make sure everything works properly:
+
+----
+$ cd erlang
+$ make tests
+----
+
+[NOTE]
+.To use as a dependency in an erlang.mk project, add something like:
+====
+-----
+dep_jfdb = git https://github.com/jflatow/jfdb.git
+ERL_LIBS = $(DEPS_DIR)/jfdb/erlang
+-----
+====
+
+=== Opening and closing databases
+
+Let's open an `Erlang` shell:
+
+----
+$ erl -pa ebin
+----
+
+Now, we can create a db named `basic-db` in the current directory:
+
+----
+> DB = jfdb:open("basic-db").
+----
+
+This will create a file named `basic-db.keys` and another named `basic-db.vals`.
+Opening a database always creates these files if they do not exist.
+
+The database will be closed when the term is garbage collected, however there are some drawbacks to relying on this.
+
+WARNING: Only ever open one instance a particular db (i.e. the same path) at a time.
+         Seriously, this is very important.
+         If you fail to adhere to this, undefined behavior can occur, including data corruption and/or VM crashes.
+         If you plan to reopen a database, do not rely on it automatically closing.
+
+To explicitly close the database yourself, just do:
+
+----
+> DB = jfdb:close(DB).
+----
+
+NOTE: Most functions (except for retrieval operations) return `DB = {jfdb, <<>>} | {error, Reason}`.
+      In the case of `close` here, we use the match to assert that nothing goes wrong during the operation.
+
+Once you call `close` on a database, you should not use it again in any other operation.
+
+Finally, we can also open a database __temporarily__.
+That means, the database files will be deleted when it is closed.
+This is primarily useful for things like testing, however there may be other use cases in the <<future,future>>.
+To do that:
+
+----
+> DB = jfdb:open("tmp-db", [temporary]).
+----
+
+==== Keys, values, and paths
+
+Now that we know how to open and close a db, let's free our variable binding, and open it again:
+
+----
+> f(DB), DB = jfdb:open("basic-db").
+----
+
+Let's try storing a simple key and value:
+
+----
+> DB = jfdb:assign(DB, key, val).
+----
+
+Then we can read it back:
+
+----
+> val = jfdb:lookup(DB, key).
+----
+
+And we can look at all our keys:
+
+----
+> [<<"k">>, <<"key">>] = jfdb:keys(DB).
+----
+
+You probably noticed that upon reading, our keys became binaries.
+That's because any keys we give are implicitly mapped to binaries.
+
+You may have also noticed that the keys are sorted.
+That is not a coincidence: keys are always prefix compressed and ordered.
+On the other hand, values are always returned exactly as they are specified.
+
+NOTE: There are actually two levels of interface provided by the `Erlang` bindings.
+      We're mainly dealing with the higher level one, which supports things like key paths and nested objects.
+      You may also use the lower level interface, which deals only with the raw binary data.
+      That interface is not recommended, though that is the only option available in `C`.
+      The `keys` function is the only raw function we will mention, from now on we will deal only with `paths`.
+
+Getting a little fancier, let's try using a *path* instead of a simple key.
+We'll also store a slightly more complex value:
+
+----
+> DB = jfdb:assign(DB, [path, to, a], #{a => <<"ok">>}).
+> DB = jfdb:assign(DB, [path, to, b], #{b => <<"ok">>}).
+----
+
+Paths allow us to store hierarchical data.
+This is not unlike a file system which contains directories and files.
+We will soon see <<sub-dbs,sub-dbs>> which are like directories, as opposed to the values we have been using, which are like files.
+Later when we look at <<indices,indices>>, we will see that `JFDB` is not just like a file system, but rather a _tagged_ file system.
+
+If that didn't make any sense, don't worry, let's just see what happens when we use paths:
+
+----
+> jfdb:lookup(DB, [path, to]).
+[{<<"a">>,#{a => <<"ok">>}},
+ {<<"b">>,#{b => <<"ok">>}}]
+----
+
+If we only care about whether or not a path exists in the db:
+
+----
+> true = jfdb:exists(DB, [path, to]).
+----
+
+We can remove full paths, or just the prefixes:
+
+----
+> DB = jfdb:remove(DB, [path, to]).
+> false = jfdb:exists(DB, [path, to]).
+----
+
+[[sub-dbs]]
+=== Sub-dbs
+
+What happens if we just look at the first component of our path?
+There's no value there, so what do we get back?
+Well, we still get back an object, but for each key we get back a *sub-db*:
+
+----
+> [{<<"to">>, Sub}] = jfdb:lookup(DB, [path]).
+----
+
+For the most part, we can use the sub-db the same way we would use a db:
+
+----
+> jfdb:lookup(Sub, a).
+#{a => <<"ok">>}
+> jfdb:lookup(Sub, b).
+#{b => <<"ok">>}
+----
+
+[[indices]]
+=== Indices and search
+
+So far, so good, but the real _raison d'être_ for `JFDB` is to support searching arbitrary properties of a (mutable) dataset.
+`JFDB` is not _just_ an efficient way to store complex `Erlang` terms on disk, without any meaningful size limits.
+Using indices (which are keys / paths exactly like the primary keys we discussed above), you get fast, multi-dimensional access to your data.
+The indices are first class citizens in `JFDB`, which means they are atomically written together with the primary key and value.
+It also means indices get prefix compressed, just like primaries.
+
+Creating indices is easy:
+
+----
+> DB = jfdb:assign(DB, k1, v1, [[time, a], [place, p1]]).
+> DB = jfdb:assign(DB, k2, v2, [[time, b], [place, p1]]).
+> DB = jfdb:assign(DB, k3, v3, [[time, a], [place, p2]]).
+----
+
+So is searching:
+
+----
+> jfdb:search(DB, [time, a]).
+[{<<"k1">>,v1},{<<"k3">>,v3}]
+> jfdb:search(DB, {all, [[time, a], [place, p1]]}).
+[{<<"k1">>,v1}]
+> jfdb:search(DB, {but, [{any, [[time, a], [time, b]]}, [place, p2]]}).
+[{<<"k2">>,v2},{<<"k1">>,v1}]
+----
+
+Notice how when searching, the return items are not always in order.
+If you are searching for a single index key, the order is guaranteed.
+All bets are off when performing complex queries over multiple keys.
+
+We can search prefix paths too.
+Another way to restate the last query we executed could be:
+
+----
+> jfdb:search(DB, {but, [[time], [place, p2]]}).
+[{<<"k2">>,v2},{<<"k1">>,v1}]
+----
+
+That is ``has time but not place p2''.
+
+In addition, we can use arbitrary prefixes, not just components of the path.
+For instance, let's suppose we want to support text search on value:
+
+----
+> DB = jfdb:assign(DB, [some, path], #{first_name => <<"Jared">>, last_name => <<"Flatow">>}, [[word, <<"Jared">>], [word, <<"Flatow">>]]).
+----
+
+We invented the word keyspace for our text search so that it doesn't interfere with any other keys we have.
+Now we can search a prefix, e.g. as a user types:
+
+----
+> jfdb:search(DB, {pre, [word, <<"Ja">>]}).
+[{[<<"some">>,<<"path">>],
+  #{first_name => <<"Jared">>,last_name => <<"Flatow">>}}]
+----
+
+One more thing worth knowing, is that we can list indices, not just primaries:
+
+----
+> jfdb:paths(DB, [], [indices]).
+[[<<"place">>,<<"p1">>],
+ [<<"place">>,<<"p2">>],
+ [<<"time">>,<<"a">>],
+ [<<"time">>,<<"b">>],
+ [<<"word">>,<<"Flatow">>],
+ [<<"word">>,<<"Jared">>]]
+----
+
+That second argument is a path.
+Remember, paths can mention prefixes:
+
+----
+> jfdb:paths(DB, {pre, [place, p]}, [indices]).
+[<<"1">>,<<"2">>]
+----
+
+I mean it, they can _always_ use prefixes:
+
+----
+> jfdb:lookup(DB, {pre, [some, path]}).
+[{[],#{first_name => <<"Jared">>,last_name => <<"Flatow">>}}]
+----
+
+If you understand why that last example returned an item tuple and not just a value, then you are really grokking `JFDB`.
+
+[[compaction]]
+=== Flushing and crushing
+
+If you want to ensure a write gets to disk, you have 3 options:
+
+ 1. Add the `flush` option to the write call, i.e. `jfdb:assign(DB, Path, Val, Indices, [flush])`
+ 2. Call `flush` on the db, i.e. `jfdb:flush(DB)`
+ 3. Call `crush` on the db, i.e. `jfdb:crush(DB)`
+
+Unlike `flush`, `crush` will actually compact the db into a single level.
+This normally happens automatically, but you can do it manually, e.g. if you want to optimize for reading.
+For more information about what this means, see <<implementation>>.
+
+[[performance]]
+== How fast is it?
+
+Well, that's an impossible question, it depends on your use case.
+But here are some quick tests from the root directory of `JFDB`.
+
+----
+time test/jfdb test-db
+----
+
+That's using the `C` API, and on my MacBook Pro I get *~30-40K* writes per second.
+
+Using the `Erlang` API:
+
+----
+time (cd erlang && test/jfdb erl-test-db assign 10000)
+time (cd erlang && test/jfdb erl-test-db lookup 10000)
+----
+
+For me, that comes to *~5K* writes per second, and *~20K* reads per second.
+
+All these tests use pretty trivial keys and values, and are actually doing stuff besides just reading and writing the values.
+They also don't use any of the advanced features of `JFDB`.
+I'd love to see your benchmarks!
+
+[[implementation]]
+== How does it work?
+
+This is a work in progress, the authoritative answer to this is _read the code_.
+There are really only *~2500* lines of code in https://github.com/jflatow/jfdb/tree/master/src[jfdb/src] that do the bulk of the work.
+The fancy querying is mostly part of the `Erlang` bindings under https://github.com/jflatow/jfdb/blob/master/erlang/c_src/jfdb_nif.c[erlang/c_src/jfdb_nif.c].
+
+Essentially there are 2 files, `.keys` and `.vals`.
+The `.keys` file contains the tries (more detail to come).
+The `.vals` file contains bulk value data, allocated in blocks.
+Both files are mmapped.
+
+Here are a couple of random notes on the `Erlang` bindings for now:
+
+ - the nif has its own queue / thread, it will not block the scheduler
+ - the resource uses < `4KB` memory overhead per db
+ ** `JFT_KEY_LIMIT` defaults to `1KB`, i.e. maximum of `1024` bytes per key.
+     You can change the limit to match your data, the largest possible is `4KB`.
+    `256B` is enough for most, `512B` or `1KB` is probably more than enough for anyone.
+ ** 2 key data buffers in `Erlang` bindings
+ ** 1 key data buffer in the core db
+
+[[future]]
+== What's next?
+
+I've been thinking a lot about memory-only dbs and complex transactions.
+Also, possibly exposing the `JFT` objects (tries) directly to `Erlang`.
+These are highly related topics.
+More on this to come...
