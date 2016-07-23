@@ -99,7 +99,7 @@ Opening a database always creates these files if they do not exist.
 
 The database will be closed when the term is garbage collected, however there are some drawbacks to relying on this.
 
-WARNING: Only ever open one instance a particular db (i.e. the same path) at a time.
+WARNING: Only ever open one instance of a particular db (i.e. the same path) at a time.
          Seriously, this is very important.
          If you fail to adhere to this, undefined behavior can occur, including data corruption and/or VM crashes.
          If you plan to reopen a database, do not rely on it automatically closing.
@@ -266,7 +266,7 @@ For instance, let's suppose we want to support text search on value:
 > DB = jfdb:assign(DB, [some, path], #{first_name => <<"Jared">>, last_name => <<"Flatow">>}, [[word, <<"Jared">>], [word, <<"Flatow">>]]).
 ----
 
-We invented the word keyspace for our text search so that it doesn't interfere with any other keys we have.
+We invented the `word` keyspace for our text search so that it doesn't interfere with any other keys we have.
 Now we can search a prefix, e.g. as a user types:
 
 ----

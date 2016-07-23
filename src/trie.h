@@ -193,7 +193,7 @@ typedef JFT_Status (*JFT_SpliceFun)(JFT_Cursor *cursors, JFT_MergeContext *ctx, 
 
 static const JFT_Range JumpTableRanges[] = {
   {.min = JFT_SYMBOL_PRIMARY,  // root
-               .max = JFT_SYMBOL_INDICES},
+   .max = JFT_SYMBOL_INDICES},
   {.min = 65,  .max = 90},     // upper
   {.min = 97,  .max = 122},    // lower
   {.min = 48,  .max = 57},     // numeral

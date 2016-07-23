@@ -5,14 +5,14 @@
 /* Common Erlang Terms */
 
 #define ATOM(Val)         (enif_make_atom(env, Val))
-#define BIN(Bin)	  (enif_make_binary(env, &Bin))
+#define BIN(Bin)          (enif_make_binary(env, &Bin))
 #define CONS(H, T)        (enif_make_list_cell(env, H, T))
 #define PAIR(A, B)        (enif_make_tuple2(env, A, B))
-#define STRING(Val)	  (enif_make_string(env, Val, ERL_NIF_LATIN1))
+#define STRING(Val)       (enif_make_string(env, Val, ERL_NIF_LATIN1))
 #define TERM_EQ(lhs, rhs) (enif_compare(lhs, rhs) == 0)
 #define JFDB(jfdb)        (PAIR(ATOM_JFDB, make_reference(env, jfdb)))
 #define ASYNC(R)          (PAIR(ATOM_JFDB, R))
-#define ERROR(R)	  (PAIR(ATOM_ERROR, R))
+#define ERROR(R)          (PAIR(ATOM_ERROR, R))
 #define ERROR_JFDB(jfdb)  (ERROR(STRING(JFDB_str_error(jfdb->db))))
 
 // NB: we would create these statically in a process independent env
