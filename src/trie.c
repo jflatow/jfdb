@@ -147,8 +147,12 @@ JFT_Status JFT_cursor_merge(JFT_Cursor *cursors,
   if (num < 1 || num > JFT_MASK_CAPACITY)
     return ENumCursors;
 
-  // allocate all the stack space we will need up front
+  // determine the max key size and ensure it is within bounds
   JFT_KeySize maxKeySize = max_key_size(cursors, num);
+  if (maxKeySize > JFT_KEY_LIMIT)
+    return EKeySize;
+
+  // allocate all the stack space we will need up front
   JFT_MergeFrame *stack = calloc(maxKeySize, sizeof(JFT_MergeFrame)), *frame = stack;
   if (stack == NULL)
     return ENoMem;

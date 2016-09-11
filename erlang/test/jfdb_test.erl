@@ -38,3 +38,13 @@ check_basic(N, DB) ->
               ?assertEqual(jfdb:lookup(DB, [l(X rem 10), l(X rem 10), l(X)]), #{map => X})
       end, [], lists:seq(1, N)),
     DB.
+
+key_limit_test() ->
+    key_limit_test(10000).
+
+key_limit_test(N) ->
+    check_key_limit(N, jfdb:open("key_limit_test", [temporary])).
+
+check_key_limit(N, DB) ->
+    {error, _} = jfdb:annul(DB, crypto:strong_rand_bytes(N)),
+    {error, _} = jfdb:store(DB, crypto:strong_rand_bytes(N), <<"value">>).

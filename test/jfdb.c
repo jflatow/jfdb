@@ -89,7 +89,8 @@ static void store_small(JFDB *db, int flags) {
   }
 }
 
-static int test_store(JFDB *db, int flags) {
+static int test_store(JFDB *db) {
+  int flags = 0;
   store_basic(db, flags);
   store_small(db, flags);
   return JFDB_pif_error(db, "Failed to store");
@@ -100,14 +101,27 @@ static int test_crush(JFDB *db) {
   return JFDB_pif_error(db, "Failed to crush");
 }
 
+static int test_find(JFDB *db) {
+  JFT_Cursor cursor;
+  for (uint64_t i = 0; i < 10000; i++) {
+    JFT_Stem k = (JFT_Stem) {
+      .pre = JFT_SYMBOL_PRIMARY,
+      .size = 8,
+      .data = (uint8_t *)&i
+    };
+    JFDB_find(db, &cursor, &k);
+  }
+  return 0;
+}
+
 static int test_db(int argc, char **argv) {
   JFDB *db = JFDB_open(argc > 1 ? argv[1] : "", 0);
-  int flags = argc > 2 ? atoi(argv[2]) : 0;
 
   if (JFDB_pif_error(db, "Failed to open"))
     return -1;
 
-  test_store(db, flags);
+  test_store(db);
+  test_find(db);
   test_crush(db);
 
   JFDB_close(db);

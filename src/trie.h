@@ -81,6 +81,7 @@ typedef enum {
   Ok,
   Step,
   Next,
+  EKeySize,
   ENumCursors,
   ENoMem,
   EUnknown

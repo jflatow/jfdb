@@ -327,8 +327,9 @@ But here are some quick tests from the root directory of `JFDB`.
 time test/jfdb test-db
 ----
 
-That test uses the `C` API to write just over 10,000 values.
+That test uses the `C` API to write just over 10,000 values, and then find them.
 On my MacBook Pro I get *~20-30K* writes per second.
+I can find up to *5M* keys per second using a crushed DB.
 
 Using the `Erlang` API:
 
