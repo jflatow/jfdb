@@ -366,10 +366,12 @@ Here are a couple of random notes on the `Erlang` bindings for now:
  ** 2 key data buffers in `Erlang` bindings
  ** 1 key data buffer in the core db
 
+NOTE: For more information on the "theory", take a look at this http://jflatow.github.io/talks/intro-to-jfdb[tech talk].
+
 [[future]]
 == What's next?
 
-I've been thinking a lot about memory-only dbs and complex transactions.
+Maybe memory-only dbs and complex transactions.
 Also, possibly exposing the `JFT` objects (tries) directly to `Erlang`.
-These are highly related topics.
+These are related topics.
 More on this to come...
