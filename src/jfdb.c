@@ -33,8 +33,8 @@ static void print_meta(JFDB *db) {
 }
 
 static JFT_Status pkey(JFT_Cursor *cursor, JFDB_Slice *slice, JFT_Boolean isTerminal) {
-  printf(isTerminal ? "[val] " : "[sub] ");
-  print_stem(*slice->stem);
+  if (JFT_leaf(cursor->node).size)
+    print_stem(isTerminal ? "[val] " : "[sub] ", *slice->stem);
   return Next;
 }
 
@@ -43,26 +43,70 @@ static void print_keys(JFDB *db, JFT_Stem *prefix, JFT_Symbol *stop) {
 }
 
 static void print_info(JFDB *db, JFT_Stem *prefix, JFT *node, JFT_Symbol *stop) {
-  JFT_Stem key = (JFT_Stem) {.data = db->keyData};
-  JFT_Keys keys;
-  JFT_Cursor cursor = JFT_cursor(node);
+  JFT_Stem key = JFT_key(node, db->keyData), val = (JFT_Stem) {};
   printf("-----\n");
   printf("@ %ld\n", node - db->kmap.map);
-  printf("> ");
-  print_stem(*prefix);
-  printf("< ");
-  print_stem(JFT_key(cursor.node, db->keyData));
-  print_node(cursor.node);
-  for (keys = JFT_keys(&cursor, &key, Forward); JFT_keys_next_until(&keys, stop); ) {
-    printf(JFT_cursor_at_terminal(&cursor) ? "[val] " : "[sub] ");
-    print_stem(*keys.stem);
-  }
+  print_stem("> ", *prefix);
+  print_stem("< ", key);
+  print_node(node);
+  if (JFT_node_type(node) == Leaf)
+    if (key.pre == JFT_SYMBOL_PRIMARY)
+      if (JFDB_get_value(db, node, &val))
+        print_stem("= ", val);
+  JFT_Cursor cursor = JFT_cursor(node);
+  for (JFT_Keys keys = JFT_keys(&cursor, &key, Forward); JFT_keys_next_until(&keys, stop); )
+    print_stem(JFT_cursor_at_terminal(&cursor) ? "[val] " : "[sub] ", *keys.stem);
 }
 
 static void print_find(JFDB *db, JFT_Stem *prefix, JFT_Symbol *stop) {
   JFT_Cursor cursor;
-  JFDB_find(db, &cursor, prefix);
-  print_info(db, prefix, cursor.node, stop);
+  if (JFDB_find(db, &cursor, prefix))
+    print_info(db, prefix, cursor.node, stop);
+}
+
+static void load_input(JFDB *db, FILE *input) {
+  int c, s = 0, n = 2;
+  JFT_Stem *stems = malloc(n * sizeof(JFT_Stem));
+  JFT_Boolean escaped = False;
+  char *buf = malloc(1 << 20); // NB: static buffer
+  size_t bufSize = 0;
+  stems[0] = (JFT_Stem) {
+    .size = 0,
+    .data = (uint8_t *)buf
+  };
+  while ((c = getc(input)) != EOF) {
+    if (escaped) {
+      // copy byte no matter what
+      buf[bufSize++] = c;
+      stems[s].size++;
+      escaped = False;
+    } else if (c == '\\') {
+      // escape the next byte
+      escaped = True;
+    } else if (c == '\t') {
+      // close out current stem, start next one
+      if (++s >= n)
+        stems = realloc(stems, (n *= 2) * sizeof(JFT_Stem));
+      stems[s] = (JFT_Stem) {
+        .size = 0,
+        .data = (uint8_t *)&buf[bufSize]
+      };
+    } else if (c == '\n') {
+      // close out current stem, write db, reset
+      if (s)
+        JFDB_store(db, &stems[0], &stems[1], &stems[2], s > 1 ? s - 1 : 0, 0);
+      else
+        JFDB_annul(db, &stems[0], 0);
+      bufSize = s = 0;
+      stems[s].size = 0;
+    } else {
+      // copy byte
+      buf[bufSize++] = c;
+      stems[s].size++;
+    }
+  }
+  free(stems);
+  free(buf);
 }
 
 static int pif_error(int test, const char *str) {
@@ -78,6 +122,7 @@ static int usage(int isError) {
           " jfdb node /db/path [offset]\n"
           " jfdb keys /db/path [-n] [-p|-i] [prefix]\n"
           " jfdb find /db/path [-n] [-p|-i] [prefix]\n"
+          " jfdb load /db/path\n"
           " jfdb wipe /db/path\n");
   return isError;
 }
@@ -161,6 +206,7 @@ int main(int argc, char **argv) {
     case 'n':
     case 'k':
     case 'f':
+    case 'l':
       db = JFDB_open(argv[2], 0);
       if (JFDB_pif_error(db, "Failed to open"))
         return -1;
@@ -180,6 +226,9 @@ int main(int argc, char **argv) {
         case 'f':
           if (!prefix_opts(&prefix, &stop, argc - 2, argv + 2))
             print_find(db, &prefix, stop);
+          break;
+        case 'l':
+          load_input(db, stdin);
           break;
       }
       if (JFDB_close(db))

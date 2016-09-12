@@ -29,7 +29,8 @@ static inline void print_bytes(const uint8_t *data, size_t N) {
       printf("%c", data[i]);
 }
 
-static inline void print_stem(const JFT_Stem stem) {
+static inline void print_stem(const char *label, const JFT_Stem stem) {
+  printf("%s", label);
   if (stem.pre)
     printf("\x1b[32m%s \x1b[0m", JFT_symbol_name(&stem.pre));
   print_bytes(stem.data, stem.size - (stem.pre ? 1 : 0));
@@ -107,7 +108,7 @@ static inline void print_node(const JFT *node) {
          stem.size,
          JFT_type_info(node),
          JFT_parent_offset(node));
-  print_stem(stem);
+  print_stem("", stem);
   printf("-----\n");
   switch (JFT_node_type(node)) {
     case Root:      print_root(node); break;

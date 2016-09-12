@@ -138,7 +138,6 @@ struct JFDB_Slice {
   JFT_Stem *stem;
   JFT_Symbol *stop;
   JFT_KeySize zero;
-  JFT_KeySize nth;
   JFDB_FoldFun fun;
   void *acc;
 };

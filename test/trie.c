@@ -46,11 +46,9 @@ int main(int argc, char **argv) {
     JFT_Stem q = (JFT_Stem) {.data = malloc(JFT_KEY_LIMIT)};
     JFT_Keys ks = JFT_keys(&c, &q, Reverse);
     uint8_t keyData[JFT_KEY_LIMIT];
-    print_stem(JFT_key(c.node, keyData));
-    while (JFT_keys_next(&ks)) {
-      printf(" -> ");
-      print_stem(*ks.stem);
-    }
+    print_stem("", JFT_key(c.node, keyData));
+    while (JFT_keys_next(&ks))
+      print_stem(" -> ", *ks.stem);
     free(q.data);
   } else {
     printf("Failed to splice atom\n");

@@ -568,23 +568,19 @@ static JFT_Status splice_fold(JFT_Cursor *cursors, JFT_MergeContext *ctx, JFT_Ph
   JFT_MergeFrame *frame = ctx->frame;
   JFDB_Slice *slice = (JFDB_Slice *)ctx->acc;
   JFT_Cursor *cursor = cursors + ffsll(frame->active) - 1;
+  JFT_KeySize depth = frame - ctx->stack;
 
-  if (phase == Out) {
-    if (slice->nth--)
-      slice->stem->size--;
+  if (phase == Out)
     return Ok;
-  }
 
-  if (cursor->symbol < JFT_SYMBOL_TOP)
-    JFT_set_symbol_at_point(slice->stem, slice->stem->size, cursor->symbol);
+  if ((slice->stem->size = slice->zero + depth))
+    JFT_set_symbol_at_point(slice->stem, slice->stem->size - 1, cursor->symbol);
 
   if (JFT_cursor_at_terminal(cursor)) {
     return slice->fun(cursor, slice, True);
-  } else if (slice->stop && cursor->symbol == *slice->stop && slice->nth) {
+  } else if (slice->stop && cursor->symbol == *slice->stop && depth) {
     return slice->fun(cursor, slice, False);
   }
-  if (slice->nth++)
-    slice->stem->size++;
   return Step;
 }
 
