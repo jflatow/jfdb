@@ -123,7 +123,8 @@ static int usage(int isError) {
           " jfdb keys /db/path [-n] [-p|-i] [prefix]\n"
           " jfdb find /db/path [-n] [-p|-i] [prefix]\n"
           " jfdb load /db/path\n"
-          " jfdb wipe /db/path\n");
+          " jfdb wipe /db/path\n"
+          " jfdb crush /db/path\n");
   return isError;
 }
 
@@ -157,7 +158,7 @@ static int prefix_opts(JFT_Stem *prefix, JFT_Symbol **stop, int argc, char **arg
   prefix->size = 1;
 
   while ((opt = getopt_long(argc, argv, "hnspi", options, &ptr)) != -1) {
-    switch(opt) {
+    switch (opt) {
       case 'h':
         return usage(0);
       case 'n':
@@ -207,6 +208,7 @@ int main(int argc, char **argv) {
     case 'k':
     case 'f':
     case 'l':
+    case 'c':
       db = JFDB_open(argv[2], 0);
       if (JFDB_pif_error(db, "Failed to open"))
         return -1;
@@ -229,6 +231,9 @@ int main(int argc, char **argv) {
           break;
         case 'l':
           load_input(db, stdin);
+          break;
+        case 'c':
+          JFDB_crush(db);
           break;
       }
       if (JFDB_close(db))
